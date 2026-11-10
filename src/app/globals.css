@@ -193,6 +193,32 @@ body {
   border-radius: 4px;
 }
 
+/*
+  Skip link. Off screen until it takes focus, then it slides into the top-left
+  corner as a small solid chip. The negative offset has to clear the whole chip,
+  or part of it stays visible and it becomes a stray label on the page.
+*/
+.skip-link {
+  position: fixed;
+  top: 0.75rem;
+  left: 0.75rem;
+  z-index: 100;
+  transform: translateY(calc(-100% - 1rem));
+  border: 1px solid var(--stroke-strong);
+  border-radius: var(--radius-sm);
+  background: var(--solid-bg);
+  padding: 0.5rem 0.85rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--solid-fg);
+  box-shadow: 0 8px 24px -8px rgba(0, 0, 0, 0.45);
+  transition: transform 0.18s var(--ease-out);
+}
+.skip-link:focus-visible {
+  transform: translateY(0);
+  outline-offset: 3px;
+}
+
 button {
   cursor: pointer;
 }

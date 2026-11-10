@@ -332,6 +332,11 @@ export function Chat() {
 
   return (
     <div className="flex h-dvh overflow-hidden bg-ink-100">
+      {/* First thing in the tab order, so a keyboard user can jump past the
+          sidebar and land on the conversation. Hidden until it is focused. */}
+      <a href="#main" className="skip-link">
+        Skip to content
+      </a>
       <Sidebar
         conversations={summaries}
         activeId={conversation?.id ?? null}
@@ -351,7 +356,7 @@ export function Chat() {
 
       <StudyMode open={studyOpen} onClose={() => setStudyOpen(false)} />
 
-      <main className="relative flex min-w-0 flex-1 flex-col">
+      <main id="main" tabIndex={-1} className="relative flex min-w-0 flex-1 flex-col">
         <header className="flex h-14 shrink-0 items-center gap-1.5 px-3 sm:px-5">
           <button
             type="button"
