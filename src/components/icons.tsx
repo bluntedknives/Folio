@@ -239,3 +239,33 @@ export function SpinnerIcon({ className }: IconProps) {
     </svg>
   );
 }
+
+/** Monitor outline, for the screen-share affordance. */
+export function ScreenIcon({ className }: IconProps) {
+  return (
+    <svg {...base} className={className}>
+      <rect x="2.75" y="4.5" width="18.5" height="12.5" rx="2" />
+      <path d="M9 20.5h6M12 17v3.5" />
+    </svg>
+  );
+}
+
+/** Solid triangle. The Play affordance in Study mode. */
+export function PlayIcon({ className }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden className={className}>
+      <path d="M8 5.6c0-.8.9-1.3 1.6-.9l8.3 5.5c.6.4.6 1.3 0 1.7l-8.3 5.5c-.7.4-1.6-.1-1.6-.9Z" />
+    </svg>
+  );
+}
+
+/** Square with an arrow leaving it, for popping the panel into a floating window. */
+export function PopOutIcon({ className }: IconProps) {
+  return (
+    <svg {...base} className={className}>
+      <rect x="3.5" y="6.5" width="13" height="14" rx="2" />
+      <path d="M13 3.5h7.5V11" />
+      <path d="M20.5 3.5 11 13" />
+    </svg>
+  );
+}

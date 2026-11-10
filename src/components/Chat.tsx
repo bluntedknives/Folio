@@ -21,7 +21,15 @@ import { MessageBubble } from "./Message";
 import { Composer } from "./Composer";
 import { EmptyState } from "./EmptyState";
 import { Plotter } from "./Plotter";
-import { ArrowDownIcon, DownloadIcon, PanelIcon, PlusIcon, SpinnerIcon } from "./icons";
+import { StudyMode } from "./StudyMode";
+import {
+  ArrowDownIcon,
+  DownloadIcon,
+  PanelIcon,
+  PlusIcon,
+  ScreenIcon,
+  SpinnerIcon,
+} from "./icons";
 
 /** True when the most recent user turn carried anything the model must read. */
 function lastTurnWasMultimodal(messages: ChatMessage[]): boolean {
@@ -37,6 +45,7 @@ export function Chat() {
   const [summaries, setSummaries] = useState<ConversationSummary[]>([]);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [plotterOpen, setPlotterOpen] = useState(false);
+  const [studyOpen, setStudyOpen] = useState(false);
   const [streaming, setStreaming] = useState(false);
   const [working, setWorking] = useState<string>("Thinking");
   const [pinned, setPinned] = useState(true);
@@ -308,6 +317,15 @@ export function Chat() {
         onAsk={(text) => void send(text, [])}
       />
 
+      <StudyMode
+        open={studyOpen}
+        onClose={() => setStudyOpen(false)}
+        messages={messages}
+        streaming={streaming}
+        onAsk={(text, attachments) => void send(text, attachments)}
+        onStop={stop}
+      />
+
       <main className="relative flex min-w-0 flex-1 flex-col">
         <header className="flex h-14 shrink-0 items-center gap-1.5 px-3 sm:px-5">
           <button
@@ -337,6 +355,15 @@ export function Chat() {
               </>
             )}
           </span>
+          <button
+            type="button"
+            onClick={() => setStudyOpen(true)}
+            aria-label="Open study mode"
+            title="Study mode: share your screen"
+            className="icon-button"
+          >
+            <ScreenIcon className="h-4 w-4" />
+          </button>
           <button
             type="button"
             onClick={exportChat}

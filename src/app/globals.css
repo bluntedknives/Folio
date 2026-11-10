@@ -919,3 +919,238 @@ input {
   color: var(--ink-500);
   pointer-events: none;
 }
+
+/* ---------- study mode (screen share overlay) ---------- */
+
+/* Hosts the in-page panel and the portalled one inside the PiP window. */
+.study-panel {
+  position: fixed;
+  right: 1rem;
+  bottom: 1rem;
+  z-index: 50;
+  display: flex;
+  width: min(24rem, calc(100vw - 2rem));
+  max-height: min(34rem, calc(100vh - 2rem));
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--stroke-strong);
+  border-radius: var(--radius-lg);
+  background: var(--ink-100);
+  box-shadow:
+    0 1px 0 0 var(--stroke-faint) inset,
+    0 18px 48px -12px rgba(0, 0, 0, 0.45);
+  animation: study-in 0.32s var(--ease-out);
+}
+
+/* Inside the PiP window the panel is the whole document, so it drops the
+   floating chrome and fills the frame. */
+.study-floating {
+  position: static;
+  inset: auto;
+  width: 100%;
+  height: 100vh;
+  max-height: none;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  animation: none;
+}
+
+@keyframes study-in {
+  from {
+    opacity: 0;
+    transform: translateY(0.75rem) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.study-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.6rem 0.65rem 0.6rem 0.9rem;
+  border-bottom: 1px solid var(--stroke);
+}
+
+/* Pulsing dot shown while the screen is being shared. */
+.study-live {
+  width: 0.4rem;
+  height: 0.4rem;
+  border-radius: 50%;
+  background: var(--danger);
+  box-shadow: 0 0 0 0 var(--danger);
+  animation: study-pulse 1.8s var(--ease-in-out) infinite;
+}
+@keyframes study-pulse {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in oklab, var(--danger) 55%, transparent);
+  }
+  70% {
+    box-shadow: 0 0 0 0.4rem transparent;
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+
+.study-stage {
+  position: relative;
+  display: flex;
+  min-height: 8rem;
+  max-height: 11rem;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border-bottom: 1px solid var(--stroke);
+  background: var(--ink-050);
+}
+.study-shot {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.study-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 1.25rem;
+  color: var(--ink-450);
+}
+.study-watch-badge {
+  position: absolute;
+  top: 0.5rem;
+  left: 0.5rem;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--ink-000) 82%, transparent);
+  padding: 0.15rem 0.5rem;
+  font-size: 0.625rem;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-700);
+  backdrop-filter: blur(6px);
+}
+
+.study-error {
+  margin: 0;
+  padding: 0.5rem 0.9rem;
+  border-bottom: 1px solid var(--stroke);
+  font-size: 0.75rem;
+  color: var(--danger);
+}
+
+.study-controls {
+  display: flex;
+  gap: 0.4rem;
+  padding: 0.6rem 0.9rem;
+  border-bottom: 1px solid var(--stroke);
+}
+.study-btn {
+  display: inline-flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  border-radius: 999px;
+  border: 1px solid var(--stroke);
+  background: var(--ink-150);
+  padding: 0.42rem 0.75rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--ink-800);
+  transition:
+    background-color 0.16s,
+    color 0.16s,
+    transform 0.12s var(--ease-out);
+}
+.study-btn:hover:not(:disabled) {
+  background: var(--ink-200);
+}
+.study-btn:active:not(:disabled) {
+  transform: scale(0.97);
+}
+.study-btn:disabled {
+  opacity: 0.45;
+}
+.study-btn-primary {
+  background: var(--solid-bg);
+  color: var(--solid-fg);
+  border-color: transparent;
+}
+.study-btn-primary:hover:not(:disabled) {
+  background: var(--solid-bg);
+  opacity: 0.9;
+}
+.study-btn-on {
+  border-color: color-mix(in oklab, var(--accent) 45%, transparent);
+  background: var(--accent-glow);
+  color: var(--accent);
+}
+
+.study-ask {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.55rem 0.9rem;
+  border-bottom: 1px solid var(--stroke);
+}
+.study-input {
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  background: transparent;
+  font-size: 0.8125rem;
+  color: var(--ink-900);
+  outline: none;
+}
+.study-input::placeholder {
+  color: var(--ink-500);
+}
+.study-send {
+  display: flex;
+  height: 1.75rem;
+  width: 1.75rem;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--ink-250);
+  color: var(--ink-500);
+  transition:
+    background-color 0.16s,
+    color 0.16s;
+}
+.study-send-active {
+  background: var(--solid-bg);
+  color: var(--solid-fg);
+}
+.study-send-active:hover {
+  opacity: 0.9;
+}
+
+.study-thread {
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  overscroll-contain: contain;
+  padding: 0.75rem 0.9rem 1rem;
+}
+.study-hint {
+  margin: 0;
+  padding: 0.5rem 0;
+  text-align: center;
+  font-size: 0.75rem;
+  color: var(--ink-500);
+}
+.study-question {
+  margin: 0 0 0.5rem;
+  font-size: 0.75rem;
+  color: var(--ink-500);
+}
+.study-answer {
+  font-size: 0.8125rem;
+}

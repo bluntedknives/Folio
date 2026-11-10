@@ -67,3 +67,18 @@ npm run start -- -p 12000
   `toUpstream` the question is unshifted as its own text part even when the
   attachment notes already added one, so the model never sees an image with no
   question attached.
+- Study mode (`StudyMode.tsx`) captures the screen with `getDisplayMedia` and
+  floats the panel using Document Picture-in-Picture, which is what keeps it
+  visible over another tab or app. The panel is rendered with `createPortal`
+  into the PiP window's `document.body`, so React state stays in the main
+  document while the DOM lives in the floating window. `copyStyles` clones the
+  stylesheets across and a `MutationObserver` on `<html>` keeps the theme class
+  in step, otherwise the floating window renders unstyled and light.
+- The PiP window is a separate document, so anything the panel renders must be
+  inside the portal; selectors and `document.querySelector` in the main tab do
+  not see it. In headless Chromium the PiP window opens but is not composited.
+- Frames from `capture.ts` go through a canvas before leaving, which is what
+  drops metadata from a shared screen, exactly like an uploaded image. The
+  watch loop compares a 16x16 greyscale signature and only re-scans when the
+  screen settles on something new; the threshold ignores cursor movement and
+  video playback.
