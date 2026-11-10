@@ -4,8 +4,8 @@
  * one spec type means the renderer, the parser and the plotter cannot drift.
  */
 
-import { compileExpression } from "../math/expression";
-import { PALETTE, type GraphParse, type GraphSpec } from "./spec";
+import { compileExpression, parametersOf } from "../math/expression";
+import { PALETTE, scopeFrom, type GraphParse, type GraphSpec, type ParamSpec } from "./spec";
 
 export interface PlotInput {
   /** Right-hand side only, e.g. "x^2 - 2x + 1" or "sin(x)". */
@@ -21,6 +21,8 @@ export interface GraphInput {
   yMin?: number;
   yMax?: number;
   plots: PlotInput[];
+  /** Slider values the plotter is holding, so previews match the fields. */
+  params?: Record<string, number>;
 }
 
 export function buildGraphSpec(input: GraphInput): GraphParse {
@@ -40,7 +42,14 @@ export function buildGraphSpec(input: GraphInput): GraphParse {
     plots: [],
     points: [],
     lines: [],
+    params: [],
+    tables: [],
   };
+
+  const declared = new Map<string, ParamSpec>();
+  for (const [name, value] of Object.entries(input.params ?? {})) {
+    declared.set(name, { name, min: value - 5, max: value + 5, value, step: 0.1 });
+  }
 
   let colourIndex = 0;
   for (const plot of input.plots) {
@@ -54,10 +63,13 @@ export function buildGraphSpec(input: GraphInput): GraphParse {
       return { ok: false, error: (error as Error).message };
     }
 
+    const needed = parametersOf(expr);
+    const scope = scopeFrom(declared, needed);
+
     let anyFinite = false;
     for (let i = 0; i <= 40; i++) {
       const x = spec.xMin + ((spec.xMax - spec.xMin) * i) / 40;
-      if (Number.isFinite(compiled(x))) {
+      if (Number.isFinite(compiled(x, scope))) {
         anyFinite = true;
         break;
       }
@@ -71,6 +83,7 @@ export function buildGraphSpec(input: GraphInput): GraphParse {
       compiled,
       color: plot.color ?? PALETTE[colourIndex++ % PALETTE.length],
       label: plot.label?.trim() || undefined,
+      params: needed,
     });
   }
 
@@ -88,6 +101,16 @@ export function toGraphFence(spec: GraphSpec): string {
   lines.push(`x: ${trim(spec.xMin)}..${trim(spec.xMax)}`);
   if (spec.yMin !== undefined && spec.yMax !== undefined) {
     lines.push(`y: ${trim(spec.yMin)}..${trim(spec.yMax)}`);
+  }
+  for (const param of spec.params) {
+    if (param.max > param.min) {
+      lines.push(`${param.name} = ${trim(param.min)}..${trim(param.max)}`);
+    }
+  }
+  for (const table of spec.tables) {
+    const xs = table.points.map((p) => trim(p.x)).join(", ");
+    const ys = table.points.map((p) => trim(p.y)).join(", ");
+    lines.push(`table x: ${xs} | y: ${ys}`);
   }
   for (const plot of spec.plots) {
     const options = [

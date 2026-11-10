@@ -8,6 +8,7 @@ import rehypeKatex from "rehype-katex";
 import rehypeHighlight from "rehype-highlight";
 import { CheckIcon, CopyIcon } from "./icons";
 import { Graph } from "./graph/Graph";
+import { parseGraphSpec } from "@/lib/graph/spec";
 
 /**
  * Assistant output is Markdown with LaTeX. Highlighting and KaTeX run
@@ -70,11 +71,35 @@ function CodeBlock({ children }: { children?: ReactNode }) {
   const nested = unwrapFence(code);
   if (nested) return <Graph source={nested.body} />;
 
+  // A common failure is the model putting the tag on its own line:
+  //   ```
+  //   graph
+  //   title: ...
+  //   ```
+  // which parses as an unlabelled block. Draw it when the body really is a spec.
+  const tagless = detectTaglessSpec(code);
+  if (tagless) return <Graph source={tagless} />;
+
   return (
     <CodeShell language={language} code={code}>
       {children}
     </CodeShell>
   );
+}
+
+/**
+ * Recovers a graph spec from an unlabelled fence whose first line is the tag.
+ * Requires the body to actually parse, so an ordinary code snippet that happens
+ * to start with the word "graph" is left alone.
+ */
+function detectTaglessSpec(source: string): string | null {
+  const lines = source.trim().split("\n");
+  if (lines.length < 2) return null;
+  if (!GRAPH_LANGS.has(lines[0].trim().toLowerCase())) return null;
+
+  const body = lines.slice(1).join("\n").trim();
+  if (!body) return null;
+  return parseGraphSpec(body).ok ? body : null;
 }
 
 /**

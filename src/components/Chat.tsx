@@ -23,8 +23,8 @@ import { EmptyState } from "./EmptyState";
 import { Plotter } from "./Plotter";
 import { ArrowDownIcon, DownloadIcon, PanelIcon, PlusIcon, SpinnerIcon } from "./icons";
 
-/** True when the most recent user turn carried images. */
-function lastTurnHadImages(messages: ChatMessage[]): boolean {
+/** True when the most recent user turn carried anything the model must read. */
+function lastTurnWasMultimodal(messages: ChatMessage[]): boolean {
   for (let i = messages.length - 1; i >= 0; i--) {
     if (messages[i].role === "user") return (messages[i].attachments ?? []).length > 0;
   }
@@ -106,7 +106,13 @@ export function Chat() {
    * with id `assistantId`. Shared by send and regenerate.
    */
   const runTurn = useCallback(
-    async (history: ChatMessage[], assistantId: string, model: string, label: string) => {
+    async (
+      history: ChatMessage[],
+      assistantId: string,
+      model: string,
+      label: string,
+      query: string,
+    ) => {
       setWorking(label);
       setStreaming(true);
       pinnedRef.current = true;
@@ -129,12 +135,15 @@ export function Chat() {
 
       let answered = false;
       try {
-        await streamChat(model, history, controller.signal, {
-          onReasoning: (delta) =>
+        await streamChat(model, history, query, controller.signal, {
+          onReasoning: (delta: string) =>
             patch((m) => ({ ...m, reasoning: (m.reasoning ?? "") + delta })),
-          onContent: (delta) => {
+          onContent: (delta: string) => {
             if (delta) answered = true;
             patch((m) => ({ ...m, content: m.content + delta }));
+          },
+          onSources: (sources) => {
+            if (sources.length) patch((m) => ({ ...m, sources }));
           },
           onDone: () => {},
         });
@@ -170,9 +179,9 @@ export function Chat() {
 
       // A follow-up question about a photo still needs the photo, so keep the
       // vision model in play for the turn after one too.
-      const hasImages = attachments.length > 0 || lastTurnHadImages(conversation.messages);
-      const model = routeModel({ hasImages, prompt: text });
-      const label = workingLabel({ hasImages, prompt: text });
+      const hasImages = attachments.length > 0 || lastTurnWasMultimodal(conversation.messages);
+      const model = routeModel({ hasImages, hasAudio: attachments.some((a) => a.kind === "audio"), prompt: text });
+      const label = workingLabel({ hasImages, hasAudio: attachments.some((a) => a.kind === "audio"), prompt: text });
 
       const userMessage: ChatMessage = {
         id: newId(),
@@ -200,7 +209,7 @@ export function Chat() {
         updatedAt: Date.now(),
       });
 
-      await runTurn(history, assistantId, model, label);
+      await runTurn(history, assistantId, model, label, text);
     },
     [conversation, runTurn],
   );
@@ -220,9 +229,11 @@ export function Chat() {
     if (lastUser === -1) return;
 
     const prompt = msgs[lastUser].content;
-    const hasImages = (msgs[lastUser].attachments ?? []).length > 0;
-    const model = routeModel({ hasImages, prompt });
-    const label = workingLabel({ hasImages, prompt });
+    const lastAttachments = msgs[lastUser].attachments ?? [];
+    const hasImages = lastAttachments.length > 0;
+    const hasAudio = lastAttachments.some((a) => a.kind === "audio");
+    const model = routeModel({ hasImages, hasAudio, prompt });
+    const label = workingLabel({ hasImages, hasAudio, prompt });
 
     const history = msgs.slice(0, lastUser + 1);
     const assistantId = newId();
@@ -235,7 +246,7 @@ export function Chat() {
       updatedAt: Date.now(),
     });
 
-    await runTurn(history, assistantId, model, label);
+    await runTurn(history, assistantId, model, label, prompt);
   }, [conversation, runTurn, streaming]);
 
   const stop = useCallback(() => abortRef.current?.abort(), []);

@@ -1,6 +1,7 @@
 import { readChatRequest } from "@/lib/validation";
 import { SYSTEM_PROMPT } from "@/lib/models";
-import type { WireMessage } from "@/lib/types";
+import { formatSources, search, shouldSearch } from "@/lib/search";
+import type { Source, WireMessage } from "@/lib/types";
 
 export const maxDuration = 120;
 
@@ -18,6 +19,16 @@ export async function POST(request: Request) {
     );
   }
 
+  // Search runs on the server, before the model call, so the results can be
+  // folded into the system prompt. A failure here just means no web context.
+  let sources: Source[] = [];
+  if (parsed.body.query && shouldSearch(parsed.body.query)) {
+    sources = await search(parsed.body.query);
+  }
+  const systemPrompt = sources.length
+    ? `${SYSTEM_PROMPT}\n\n${formatSources(sources)}`
+    : SYSTEM_PROMPT;
+
   const baseUrl = (process.env.NVIDIA_BASE_URL ?? "https://integrate.api.nvidia.com/v1").replace(
     /\/+$/,
     "",
@@ -32,7 +43,7 @@ export async function POST(request: Request) {
     },
     body: JSON.stringify({
       model: parsed.body.model,
-      messages: [{ role: "system", content: SYSTEM_PROMPT }, ...toUpstream(parsed.body.messages)],
+      messages: [{ role: "system", content: systemPrompt }, ...toUpstream(parsed.body.messages)],
       stream: true,
       temperature: 0.6,
       top_p: 0.95,
@@ -53,24 +64,29 @@ export async function POST(request: Request) {
       "Cache-Control": "no-cache, no-transform",
       Connection: "keep-alive",
       "X-Accel-Buffering": "no",
+      // The client reads this to show where the answer came from.
+      "X-Folio-Sources": encodeURIComponent(JSON.stringify(sources)),
     },
   });
 }
 
-/** Expands our wire format into the OpenAI-style content parts NVIDIA expects. */
+/**
+ * Expands our wire format into the OpenAI-style content parts NVIDIA expects.
+ * A message with parts becomes an array; one without stays a plain string.
+ */
 function toUpstream(messages: WireMessage[]) {
   return messages.map((m) => {
-    if (!m.images?.length) return { role: m.role, content: m.content };
-    return {
-      role: m.role,
-      content: [
-        { type: "text", text: m.content || "Read this and help me with the assignment." },
-        ...m.images.map((data) => ({
-          type: "image_url",
-          image_url: { url: data },
-        })),
-      ],
-    };
+    if (!m.parts?.length) return { role: m.role, content: m.content };
+    const parts = [...m.parts];
+    // The user's own words always ride along, even when the attachment notes
+    // added their own text part. Dropping them here left the model looking at
+    // an image with no question.
+    if (m.content.trim()) {
+      parts.unshift({ type: "text", text: m.content });
+    } else if (!parts.some((p) => p.type === "text")) {
+      parts.unshift({ type: "text", text: "Read this and help me with the assignment." });
+    }
+    return { role: m.role, content: parts };
   });
 }
 

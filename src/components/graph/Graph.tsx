@@ -1,12 +1,21 @@
 "use client";
 
-import { useCallback, useId, useMemo, useRef, useState } from "react";
-import { parseGraphSpec, type GraphSpec, type PlotSpec } from "@/lib/graph/spec";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
+import { parseGraphSpec, type GraphSpec, type ParamSpec, type PlotSpec } from "@/lib/graph/spec";
+import { mountDesmos, type DesmosHandle } from "./desmos";
 
 const WIDTH = 640;
-const HEIGHT = 380;
-const PAD = { top: 18, right: 20, bottom: 30, left: 40 };
-const SAMPLES = 720;
+const HEIGHT = 400;
+const PAD = { top: 16, right: 18, bottom: 26, left: 34 };
+const SAMPLES = 900;
 
 /** Plot area in viewBox units. */
 const PLOT = {
@@ -42,16 +51,25 @@ export function Graph({ source }: { source: string }) {
 
 export function GraphCanvas({ spec }: { spec: GraphSpec }) {
   const [hoverX, setHoverX] = useState<number | null>(null);
+  const [engine, setEngine] = useState<"local" | "desmos">("local");
   const svgRef = useRef<SVGSVGElement>(null);
   const drag = useRef<{ x: number; y: number; bounds: Bounds } | null>(null);
   // Each instance needs its own clip path id: two graphs on one page would
   // otherwise share the first one and clip against the wrong rectangle.
   const clipId = `plot-clip-${useId().replace(/:/g, "")}`;
 
-  // Keyed on the curves themselves, not the raw text, so a partially streamed
-  // block does not reset the viewport on every token.
+  // Slider values, keyed by parameter name. Reset whenever the curves change so
+  // a freshly streamed graph starts from its declared defaults.
   const plotKey = `${spec.plots.map((p) => p.expr).join("|")}::${spec.xMin}::${spec.xMax}::${spec.yMin}::${spec.yMax}`;
-  const baseBounds = useMemo(() => computeBounds(spec), [plotKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  const [paramState, setParamState] = useState<{ key: string; values: Record<string, number> }>(
+    () => ({ key: plotKey, values: initialValues(spec) }),
+  );
+  if (paramState.key !== plotKey) {
+    setParamState({ key: plotKey, values: initialValues(spec) });
+  }
+  const scope = paramState.values;
+
+  const baseBounds = useMemo(() => computeBounds(spec, scope), [plotKey, scope]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Reset the viewport when the underlying curves change (derived state, so it
   // happens during render rather than in an effect).
@@ -60,6 +78,7 @@ export function GraphCanvas({ spec }: { spec: GraphSpec }) {
 
   const view = viewState.bounds;
   const setBounds = (next: Bounds) => setViewState({ key: plotKey, bounds: next });
+
   const toX = useCallback(
     (x: number) => PLOT.x0 + ((x - view.xMin) / (view.xMax - view.xMin)) * (PLOT.x1 - PLOT.x0),
     [view],
@@ -70,17 +89,31 @@ export function GraphCanvas({ spec }: { spec: GraphSpec }) {
   );
 
   const paths = useMemo(
-    () => spec.plots.map((plot) => ({ plot, d: buildPath(plot, view) })),
-    [spec.plots, view],
+    () => spec.plots.map((plot) => ({ plot, d: buildPath(plot, view, scope) })),
+    [spec.plots, view, scope],
   );
 
   const xTicks = useMemo(() => ticks(view.xMin, view.xMax), [view.xMin, view.xMax]);
   const yTicks = useMemo(() => ticks(view.yMin, view.yMax), [view.yMin, view.yMax]);
 
+  /** Zooms about a data point, which is what the wheel should feel like. */
+  function zoomAt(factor: number, cx: number, cy: number) {
+    setBounds(zoom(view, factor, cx, cy));
+  }
+
   function onWheel(event: React.WheelEvent<SVGSVGElement>) {
     event.preventDefault();
-    const factor = event.deltaY > 0 ? 1.12 : 0.89;
-    setBounds(zoom(view, factor, view.xMin + (view.xMax - view.xMin) / 2, view.yMin + (view.yMax - view.yMin) / 2));
+    const rect = svgRef.current?.getBoundingClientRect();
+    let cx = view.xMin + (view.xMax - view.xMin) / 2;
+    let cy = view.yMin + (view.yMax - view.yMin) / 2;
+    if (rect) {
+      // Zoom about the pointer, like Desmos.
+      const px = ((event.clientX - rect.left) / rect.width) * WIDTH;
+      const py = ((event.clientY - rect.top) / rect.height) * HEIGHT;
+      cx = view.xMin + ((px - PLOT.x0) / (PLOT.x1 - PLOT.x0)) * (view.xMax - view.xMin);
+      cy = view.yMin + ((PLOT.y1 - py) / (PLOT.y1 - PLOT.y0)) * (view.yMax - view.yMin);
+    }
+    zoomAt(event.deltaY > 0 ? 1.12 : 0.89, cx, cy);
   }
 
   function onPointerDown(event: React.PointerEvent<SVGSVGElement>) {
@@ -125,20 +158,43 @@ export function GraphCanvas({ spec }: { spec: GraphSpec }) {
       ? null
       : spec.plots
           .map((plot) => {
-            const y = plot.compiled(hoverX);
+            const y = plot.compiled(hoverX, scope);
             return Number.isFinite(y) ? { plot, y } : null;
           })
           .filter((v): v is { plot: PlotSpec; y: number } => v !== null);
+
+  const sliders = spec.params.filter((p) => p.max > p.min);
+  const hasLegend = spec.plots.some((p) => p.label) || sliders.length > 0;
 
   return (
     <div className="graph-shell">
       <div className="graph-head">
         <span className="graph-lang">{spec.title ?? "graph"}</span>
-        <button type="button" onClick={() => setBounds(baseBounds)} className="graph-reset">
-          Reset view
-        </button>
+        <div className="graph-head-actions">
+          <button
+            type="button"
+            onClick={() => setEngine(engine === "desmos" ? "local" : "desmos")}
+            className="graph-reset"
+            title={
+              engine === "desmos"
+                ? "Switch to the built-in plotter"
+                : "Open in Desmos for dragging, tracing and tables"
+            }
+          >
+            {engine === "desmos" ? "Built-in" : "Desmos"}
+          </button>
+          {engine === "local" && (
+            <button type="button" onClick={() => setBounds(baseBounds)} className="graph-reset">
+              Reset view
+            </button>
+          )}
+        </div>
       </div>
 
+      {engine === "desmos" ? (
+        <DesmosView spec={spec} onFail={() => setEngine("local")} />
+      ) : (
+        <>
       <svg
         ref={svgRef}
         viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
@@ -159,7 +215,13 @@ export function GraphCanvas({ spec }: { spec: GraphSpec }) {
         </defs>
 
         <g clipPath={`url(#${clipId})`}>
-          <rect x={PLOT.x0} y={PLOT.y0} width={PLOT.x1 - PLOT.x0} height={PLOT.y1 - PLOT.y0} fill="var(--ink-100)" />
+          <rect
+            x={PLOT.x0}
+            y={PLOT.y0}
+            width={PLOT.x1 - PLOT.x0}
+            height={PLOT.y1 - PLOT.y0}
+            fill="var(--ink-100)"
+          />
 
           {xTicks.map((t) => (
             <line key={`gx${t}`} x1={toX(t)} x2={toX(t)} y1={PLOT.y0} y2={PLOT.y1} stroke="var(--stroke-faint)" />
@@ -196,6 +258,31 @@ export function GraphCanvas({ spec }: { spec: GraphSpec }) {
             />
           ))}
 
+          {spec.tables.map((table, i) => (
+            <g key={`tb${i}`}>
+              {table.connect && table.points.length > 1 && (
+                <polyline
+                  points={table.points.map((p) => `${toX(p.x)},${toY(p.y)}`).join(" ")}
+                  fill="none"
+                  stroke={table.color}
+                  strokeWidth={1.5}
+                  opacity={0.7}
+                />
+              )}
+              {table.points.map((p, j) => (
+                <circle
+                  key={j}
+                  cx={toX(p.x)}
+                  cy={toY(p.y)}
+                  r={3.2}
+                  fill={table.color}
+                  stroke="var(--ink-050)"
+                  strokeWidth={1.2}
+                />
+              ))}
+            </g>
+          ))}
+
           {spec.points.map((point, i) => (
             <g key={`pt${i}`}>
               <circle cx={toX(point.x)} cy={toY(point.y)} r={4} fill={point.color} stroke="var(--ink-050)" strokeWidth={1.5} />
@@ -210,21 +297,43 @@ export function GraphCanvas({ spec }: { spec: GraphSpec }) {
           {hoverX !== null && (
             <line x1={toX(hoverX)} x2={toX(hoverX)} y1={PLOT.y0} y2={PLOT.y1} stroke="var(--stroke-strong)" strokeDasharray="3 3" />
           )}
+          {hoverX !== null &&
+            hoverReadout?.map(({ plot, y }, i) => (
+              <circle key={`hp${i}`} cx={toX(hoverX)} cy={toY(y)} r={3.4} fill={plot.color} stroke="var(--ink-050)" strokeWidth={1.2} />
+            ))}
         </g>
 
         {xTicks.map((t) => (
-          <text key={`tx${t}`} x={toX(t)} y={HEIGHT - 11} className="graph-tick" textAnchor="middle">
+          <text key={`tx${t}`} x={toX(t)} y={HEIGHT - 9} className="graph-tick" textAnchor="middle">
             {formatTick(t)}
           </text>
         ))}
         {yTicks.map((t) => (
-          <text key={`ty${t}`} x={PLOT.x0 - 7} y={toY(t) + 3.5} className="graph-tick" textAnchor="end">
+          <text key={`ty${t}`} x={PLOT.x0 - 6} y={toY(t) + 3.5} className="graph-tick" textAnchor="end">
             {formatTick(t)}
           </text>
         ))}
       </svg>
+        </>
+      )}
 
-      {(spec.plots.some((p) => p.label) || hoverReadout) && (
+      {engine === "local" && sliders.length > 0 && (
+        <div className="graph-sliders">
+          {sliders.map((param) => (
+            <Slider
+              key={param.name}
+              param={param}
+              value={scope[param.name] ?? param.value}
+              color={colorFor(spec, param.name)}
+              onChange={(next) =>
+                setParamState((prev) => ({ key: prev.key, values: { ...prev.values, [param.name]: next } }))
+              }
+            />
+          ))}
+        </div>
+      )}
+
+      {engine === "local" && (hasLegend || hoverReadout) && (
         <div className="graph-foot">
           {hoverReadout && hoverReadout.length > 0 ? (
             hoverReadout.map(({ plot, y }, i) => (
@@ -249,8 +358,52 @@ export function GraphCanvas({ spec }: { spec: GraphSpec }) {
   );
 }
 
+/** One parameter slider, coloured to match the curves that use it. */
+function Slider({
+  param,
+  value,
+  color,
+  onChange,
+}: {
+  param: ParamSpec;
+  value: number;
+  color: string;
+  onChange: (value: number) => void;
+}) {
+  return (
+    <label className="graph-slider">
+      <span className="graph-slider-name" style={{ color }}>
+        {param.name}
+      </span>
+      <input
+        type="range"
+        min={param.min}
+        max={param.max}
+        step={param.step}
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+        aria-label={`Value of ${param.name}`}
+        style={{ color }}
+        className="graph-range"
+      />
+      <span className="graph-slider-value">{formatTick(value)}</span>
+    </label>
+  );
+}
+
+/** The colour of the first curve that reads a parameter, for the slider tint. */
+function colorFor(spec: GraphSpec, name: string): string {
+  return spec.plots.find((p) => p.params.includes(name))?.color ?? "var(--ink-600)";
+}
+
+function initialValues(spec: GraphSpec): Record<string, number> {
+  const values: Record<string, number> = {};
+  for (const param of spec.params) values[param.name] = param.value;
+  return values;
+}
+
 /** Chooses the y window: explicit if given, otherwise a robust fit to the curves. */
-function computeBounds(spec: GraphSpec): Bounds {
+function computeBounds(spec: GraphSpec, scope: Record<string, number>): Bounds {
   if (spec.yMin !== undefined && spec.yMax !== undefined) {
     return { xMin: spec.xMin, xMax: spec.xMax, yMin: spec.yMin, yMax: spec.yMax };
   }
@@ -259,10 +412,11 @@ function computeBounds(spec: GraphSpec): Bounds {
   for (const plot of spec.plots) {
     for (let i = 0; i <= 400; i++) {
       const x = spec.xMin + ((spec.xMax - spec.xMin) * i) / 400;
-      const y = plot.compiled(x);
+      const y = plot.compiled(x, scope);
       if (Number.isFinite(y)) ys.push(y);
     }
   }
+  for (const table of spec.tables) for (const p of table.points) ys.push(p.y);
   for (const point of spec.points) ys.push(point.y);
   for (const line of spec.lines) if (line.axis === "h") ys.push(line.value);
 
@@ -288,7 +442,7 @@ function computeBounds(spec: GraphSpec): Bounds {
  * discontinuities (asymptotes in tan, 1/x) and break the path so we do not
  * draw a false vertical line across the plot.
  */
-function buildPath(plot: PlotSpec, view: Bounds): string {
+function buildPath(plot: PlotSpec, view: Bounds, scope: Record<string, number>): string {
   const parts: string[] = [];
   let pen = false;
   let prevY: number | null = null;
@@ -303,7 +457,7 @@ function buildPath(plot: PlotSpec, view: Bounds): string {
 
   for (let i = 0; i <= SAMPLES; i++) {
     const x = view.xMin + ((view.xMax - view.xMin) * i) / SAMPLES;
-    const y = plot.compiled(x);
+    const y = plot.compiled(x, scope);
 
     if (!Number.isFinite(y)) {
       pen = false;
@@ -367,4 +521,77 @@ function zoom(view: Bounds, factor: number, cx: number, cy: number): Bounds {
     yMin: cy + (view.yMin - cy) * factor,
     yMax: cy + (view.yMax - cy) * factor,
   };
+}
+
+/**
+ * The Desmos calculator, mounted on demand. The library draws into its own
+ * canvas inside `containerRef`, so React never re-renders the graph itself.
+ * If the script fails to load we hand control back to the built-in plotter.
+ */
+function DesmosView({ spec, onFail }: { spec: GraphSpec; onFail: () => void }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [status, setStatus] = useState<"loading" | "ready" | "failed">("loading");
+  const handleRef = useRef<DesmosHandle | null>(null);
+  const dark = useIsDark();
+
+  useEffect(() => {
+    let cancelled = false;
+    const element = containerRef.current;
+    if (!element) return;
+
+    setStatus("loading");
+    mountDesmos(element, spec, { dark })
+      .then((handle) => {
+        if (cancelled) {
+          handle.dispose();
+          return;
+        }
+        handleRef.current = handle;
+        setStatus("ready");
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setStatus("failed");
+          onFail();
+        }
+      });
+
+    return () => {
+      cancelled = true;
+      handleRef.current?.dispose();
+      handleRef.current = null;
+    };
+    // Re-mounting on every spec change would reload the 4 MB script; the spec
+    // for a given message never changes after it finishes streaming.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Theme changes are pushed into the existing calculator rather than remounted.
+  useEffect(() => {
+    if (status === "ready") handleRef.current?.setDark(dark);
+  }, [dark, status]);
+
+  return (
+    <div className="graph-desmos">
+      <div ref={containerRef} className="graph-desmos-canvas" />
+      {status === "loading" && <span className="graph-desmos-note">Loading Desmos…</span>}
+    </div>
+  );
+}
+
+/** Tracks the `dark` class on <html> without mirroring it in state. */
+function useIsDark(): boolean {
+  const subscribe = useCallback((onChange: () => void) => {
+    const observer = new MutationObserver(onChange);
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["class"],
+    });
+    return () => observer.disconnect();
+  }, []);
+  return useSyncExternalStore(
+    subscribe,
+    () => document.documentElement.classList.contains("dark"),
+    () => false,
+  );
 }

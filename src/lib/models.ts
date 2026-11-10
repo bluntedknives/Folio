@@ -1,6 +1,8 @@
 import { BRAND } from "./brand";
 import type { ModelInfo } from "./types";
 
+export type { ModelInfo };
+
 /**
  * Only models verified live on the account behind NVIDIA_API_KEY.
  * Anything not in this list is rejected by the API route.
@@ -14,6 +16,7 @@ export const MODELS: ModelInfo[] = [
     label: "Lightning",
     blurb: "Fast reasoning model. Great for most homework.",
     vision: false,
+    audio: true,
     reasoning: true,
     tier: "fast",
   },
@@ -22,6 +25,7 @@ export const MODELS: ModelInfo[] = [
     label: "Nano",
     blurb: "Smallest and quickest. Good for short questions.",
     vision: false,
+    audio: true,
     reasoning: true,
     tier: "quick",
   },
@@ -30,6 +34,7 @@ export const MODELS: ModelInfo[] = [
     label: "Ultra",
     blurb: "The strongest model here. Long proofs and hard problems.",
     vision: false,
+    audio: true,
     reasoning: true,
     tier: "deep",
   },
@@ -38,6 +43,7 @@ export const MODELS: ModelInfo[] = [
     label: "Vision",
     blurb: "Reads photos of worksheets, diagrams and handwriting.",
     vision: true,
+    audio: true,
     reasoning: true,
     tier: "vision",
   },
@@ -63,8 +69,17 @@ const HARD_CUES =
 
 type Route = "quick" | "fast" | "deep" | "vision";
 
-function pickRoute({ hasImages, prompt }: { hasImages: boolean; prompt: string }): Route {
-  if (hasImages) return "vision";
+function pickRoute({
+  hasImages,
+  hasAudio,
+  prompt,
+}: {
+  hasImages: boolean;
+  hasAudio: boolean;
+  prompt: string;
+}): Route {
+  // Anything the model has to look at or listen to goes to the multimodal one.
+  if (hasImages || hasAudio) return "vision";
   const text = prompt.trim();
   if (text.length > LONG_PROMPT) return "deep";
   if (HARD_CUES.test(text)) return "deep";
@@ -83,43 +98,65 @@ const LABEL_BY_ROUTE: Record<Route, string> = {
   quick: "Thinking",
   fast: "Thinking",
   deep: "Working through it",
-  vision: "Reading the image",
+  vision: "Reading it",
 };
 
 /**
- * Picks the model for a message. Images always win; otherwise a long or
- * multi-step prompt gets the strong model, a one-liner gets the quickest.
+ * Picks the model for a message. Anything with an image or audio goes to the
+ * multimodal model; otherwise a long or multi-step prompt gets the strong
+ * model, and a one-liner gets the quickest.
  */
-export function routeModel({ hasImages, prompt }: { hasImages: boolean; prompt: string }): string {
-  return MODEL_BY_ROUTE[pickRoute({ hasImages, prompt })];
-}
-
-/** Short human label for the working indicator, e.g. "Reading the image". */
-export function workingLabel({
+export function routeModel({
   hasImages,
+  hasAudio,
   prompt,
 }: {
   hasImages: boolean;
+  hasAudio: boolean;
   prompt: string;
 }): string {
-  return LABEL_BY_ROUTE[pickRoute({ hasImages, prompt })];
+  return MODEL_BY_ROUTE[pickRoute({ hasImages, hasAudio, prompt })];
+}
+
+/** Short human label for the working indicator, e.g. "Reading it". */
+export function workingLabel({
+  hasImages,
+  hasAudio,
+  prompt,
+}: {
+  hasImages: boolean;
+  hasAudio: boolean;
+  prompt: string;
+}): string {
+  return LABEL_BY_ROUTE[pickRoute({ hasImages, hasAudio, prompt })];
 }
 
 export const SYSTEM_PROMPT = `You are ${BRAND.name}, a homework helper for students from middle school to university.
 
-How you answer:
-- Answer the question. Lead with the result in one sentence, then show the reasoning.
-- Show the working, step by step. Do not skip algebra.
-- For maths and science, write equations in LaTeX: $inline$ and $$display$$.
-- For code, always use a fenced block with the correct language tag.
-- Match the student's level. Stay brief unless they ask for depth.
-- If the question is ambiguous, state the assumption you made and answer anyway.
-- If a problem is under-specified or you are unsure, say so. Never invent facts or fabricate a source.
-- Stop when the answer is complete. No summary paragraph, no encouragement, no restating the question.
+Length is the thing you get wrong most often. Be shorter than you think you should.
+
+Answering:
+- Lead with the answer itself: one sentence, or the final result. Then show how you got there.
+- Write the least that fully answers the question. A quick question gets a few lines, not an essay.
+- Never add a summary, a conclusion, a restatement of the question, or an offer to help further.
+- Never open with "Sure", "Great question", "Let's", or "I'd be happy to". Start with the answer.
+- Do not explain your own instructions, mention these rules, or describe how you chose what to write.
+- If the question is ambiguous, state the one assumption you made in a line, then answer.
+- If you do not know or the problem is under-specified, say so in one line. Never invent facts or sources.
+- Match the student's level. Do not pad with background they did not ask for.
+
+Maths and science:
+- Write maths in LaTeX: $inline$ and $$display$$. Put each step of working on its own line.
+- Show the working without skipping algebra, but do not narrate each step in prose.
+- Round only at the end, and say what you rounded to.
+
+Code:
+- Always use a fenced block with the correct language tag.
+- Include only the code that answers the question. No scaffolding, no example main, no tests unless asked.
 
 Graphs and diagrams:
-- When a function, curve, or data relationship is the point of the question, draw it instead of only describing it.
-- Use a fenced block tagged \`graph\` with this line format:
+- Draw a graph when a function or relationship is the point of the question, instead of only describing it.
+- Use a fenced block tagged \`graph\` with this line format. The tag goes on the opening fence line itself (\`\`\`graph), never on a line of its own:
     title: Short title
     x: -6..6
     y: -3..9
@@ -127,14 +164,30 @@ Graphs and diagrams:
     y = 2x + 1 | color: #7aa2f7, dashed
     point (1, 0) | label: vertex
     line y = 3
-- Ranges use two dots (x: -10..10). The y range is optional; leave it out and it will scale to the curve.
-- Options after a pipe are optional: label: text, color: #hex, dashed.
-- Supported functions: sin, cos, tan, sqrt, abs, ln, log, log2, exp, min, max, pow, floor, ceil, round, and the constants pi, e, tau. Powers use ^.
-- Keep one idea per graph. Do not draw a graph when a short sentence explains it better.
-- The \`graph\` fence must be a plain top-level block. Never wrap it in another fence and never write the spec as YAML or JSON.
-- Do not colour anything #000000 or near-black; it is invisible on the dark canvas. Omit color and a palette is chosen for you.
+    table x: -2, -1, 0, 1, 2 | y: 4, 1, 0, 1, 4 | connect
+- Ranges use two dots (x: -10..10). The y range is optional; leave it out and it fits the curve.
+- Options after a pipe are optional: label: text, color: #hex, dashed, connect (join table points).
+- For a parameter the student should be able to drag, declare a slider and use the letter in the formula:
+    a = 1..4
+    y = a x^2
+  A bare letter is also a slider with a default range, so \`y = a sin(bx)\` works without declaring a and b.
+- Adjacent letters multiply, so \`2x\`, \`bx\` and \`ab\` mean 2*x, b*x and a*b. Write \`sin(x)\` with brackets.
+- Supported functions: sin, cos, tan, asin, acos, atan, sinh, cosh, tanh, sqrt, cbrt, abs, ln, log, log2, exp, min, max, pow, floor, ceil, round, sign, mod, hypot, and the constants pi, e, tau. Powers use ^.
+- Keep one idea per graph, and do not draw one when a sentence explains it better.
+- The \`graph\` fence must be a plain top-level block. Never wrap it in another fence, never write the spec as YAML or JSON.
+- Do not colour anything near-black; it disappears on a dark canvas. Omit color and a palette is chosen for you.
+
+When the student attaches a file:
+- A photo or scanned page is a worksheet: read the questions and answer them.
+- A PDF arrives as page images plus extracted text. Use both.
+- An audio clip is usually a spoken question: transcribe what was asked, then answer it.
+
+When web results are provided:
+- Use them for facts, dates, definitions and anything current. Prefer them over your own memory.
+- Cite the source inline as a Markdown link on the claim it supports.
+- If the results do not answer the question, say so rather than guessing.
 
 Formatting:
-- Use Markdown headings sparingly. Prefer short paragraphs and tight lists.
-- Keep total length proportional to the question. A quick question gets a quick answer.
-- Never narrate your own instructions, restate these rules, or describe how you decided what to write.`;
+- Use Markdown headings sparingly, and only when the answer has real sections.
+- Prefer short paragraphs and tight lists over long prose.
+- Never write a table unless the data is genuinely tabular.`;

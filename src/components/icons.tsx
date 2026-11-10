@@ -20,10 +20,12 @@ export function PlusIcon({ className }: IconProps) {
   );
 }
 
+/** A paper plane, tilted, drawn as a single folded shape. The send affordance. */
 export function SendIcon({ className }: IconProps) {
   return (
-    <svg {...base} className={className}>
-      <path d="M12 19V5M6 11l6-6 6 6" />
+    <svg {...base} className={className} strokeWidth={1.7}>
+      <path d="M4.6 11.9 19.3 4.7c.6-.3 1.2.3.9.9l-7.2 14.7c-.3.6-1.2.5-1.4-.1l-1.5-5.2a.8.8 0 0 0-.5-.5L4.4 13c-.6-.2-.7-1.1.2-1.1Z" />
+      <path d="M10.2 14.3 20 4.9" />
     </svg>
   );
 }
@@ -42,6 +44,44 @@ export function ImageIcon({ className }: IconProps) {
       <rect x="3" y="4" width="18" height="16" rx="2.5" />
       <circle cx="8.75" cy="9.5" r="1.5" />
       <path d="M3.5 17.5 9 12.5l3.5 3 3-2.5 5 5" />
+    </svg>
+  );
+}
+
+/** Paperclip for the attach button. */
+export function PaperclipIcon({ className }: IconProps) {
+  return (
+    <svg {...base} className={className}>
+      <path d="M20 11.3 12.1 19a4.6 4.6 0 0 1-6.5-6.5l7.4-7.4a3 3 0 0 1 4.2 4.2l-7.3 7.4a1.4 1.4 0 0 1-2-2l6.6-6.6" />
+    </svg>
+  );
+}
+
+/** Document with a folded corner, for a PDF attachment chip. */
+export function DocumentIcon({ className }: IconProps) {
+  return (
+    <svg {...base} className={className}>
+      <path d="M6 3h7l5 5v13H6z" />
+      <path d="M13 3v5h5" />
+    </svg>
+  );
+}
+
+/** Waveform, for an audio attachment chip. */
+export function AudioIcon({ className }: IconProps) {
+  return (
+    <svg {...base} className={className}>
+      <path d="M4 10v4M8 7v10M12 4.5v15M16 8v8M20 11v2" />
+    </svg>
+  );
+}
+
+/** Globe with a meridian, for web sources. */
+export function GlobeIcon({ className }: IconProps) {
+  return (
+    <svg {...base} className={className}>
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="M3.5 12h17M12 3.5c2.4 2.6 3.6 5.5 3.6 8.5S14.4 18.4 12 20.5c-2.4-2.1-3.6-5.5-3.6-8.5S9.6 6.1 12 3.5Z" />
     </svg>
   );
 }

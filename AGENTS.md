@@ -50,3 +50,20 @@ npm run start -- -p 12000
   state such as the DOM.
 - Graph curve colours come from `PALETTE` in `src/lib/graph/spec.ts`, which
   resolves `var(--g1..--g6)` so the same spec renders on both canvases.
+- Graphs have two engines. `Graph.tsx` draws locally into SVG (default, no
+  network). The Desmos button lazily loads `src/components/graph/desmos.ts`,
+  which maps the same `GraphSpec` onto the Desmos API. Desmos paints its own
+  canvas, so it takes theme colours as constructor options
+  (`invertedColors`, `backgroundColor`) rather than reading CSS. If the 4 MB
+  script fails to load, the component silently falls back to the local plotter.
+  Set `NEXT_PUBLIC_DESMOS_API_KEY` for a production key; otherwise the public
+  trial key is used, which logs a prototyping warning.
+- The `graph` fence tag is matched three ways in `Markdown.tsx`: as a normal
+  language tag, nested inside another fence (`unwrapFence`), and on a line of
+  its own (`detectTaglessSpec`). The last case needs the body to parse before
+  it draws, so a plain snippet that starts with the word "graph" stays code.
+  Keep that guard: without it, ordinary code renders as an empty plot.
+- A user's question and their attachments are separate wire fields. In
+  `toUpstream` the question is unshifted as its own text part even when the
+  attachment notes already added one, so the model never sees an image with no
+  question attached.

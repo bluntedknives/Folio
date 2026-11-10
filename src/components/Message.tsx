@@ -5,7 +5,9 @@ import type { ChatMessage } from "@/lib/types";
 import { Markdown } from "./Markdown";
 import { Thinking } from "./Thinking";
 import { Working } from "./Working";
-import { CheckIcon, CopyIcon, FolioMark, RefreshIcon } from "./icons";
+import { Sources } from "./Sources";
+import { copyFormatted } from "@/lib/export";
+import { AudioIcon, CheckIcon, CopyIcon, FolioMark, RefreshIcon } from "./icons";
 
 export function MessageBubble({
   message,
@@ -35,15 +37,26 @@ function UserBubble({ message }: { message: ChatMessage }) {
       <div className="flex max-w-[min(42rem,85%)] flex-col items-end gap-2">
         {message.attachments && message.attachments.length > 0 && (
           <div className="flex flex-wrap justify-end gap-2">
-            {message.attachments.map((a) => (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                key={a.label}
-                src={a.dataUrl}
-                alt={a.label}
-                className="h-24 w-24 rounded-xl border border-stroke object-cover"
-              />
-            ))}
+            {message.attachments.map((a, i) =>
+              a.kind === "image" || a.kind === "document" ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  key={`${a.name}-${i}`}
+                  src={a.dataUrl}
+                  alt={a.name}
+                  title={a.name}
+                  className="h-24 w-24 rounded-xl border border-stroke object-cover"
+                />
+              ) : (
+                <span
+                  key={`${a.name}-${i}`}
+                  className="flex h-24 w-24 flex-col items-center justify-center gap-1.5 rounded-xl border border-stroke bg-ink-150 text-ink-600"
+                >
+                  <AudioIcon className="h-5 w-5" />
+                  <span className="max-w-[5rem] truncate px-1 text-[0.625rem]">{a.name}</span>
+                </span>
+              ),
+            )}
           </div>
         )}
         {message.content.trim() && (
@@ -72,7 +85,7 @@ function AssistantBubble({
 
   async function copy() {
     try {
-      await navigator.clipboard.writeText(message.content);
+      await copyFormatted(message.content);
       setCopied(true);
       window.setTimeout(() => setCopied(false), 1400);
     } catch {
@@ -103,6 +116,10 @@ function AssistantBubble({
           <Working label={workingLabel ?? "Thinking"} />
         ) : (
           <Markdown>{message.content}</Markdown>
+        )}
+
+        {!streaming && message.sources && message.sources.length > 0 && (
+          <Sources sources={message.sources} />
         )}
       </div>
 

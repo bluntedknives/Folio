@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import type { ConversationSummary } from "@/lib/store";
 import { clearAll, storedBytes } from "@/lib/store";
 import { BRAND } from "@/lib/brand";
-import { formatBytes } from "@/lib/image";
+import { formatBytes } from "@/lib/attachment";
 import { ThemeToggle } from "./ThemeToggle";
 import { FolioMark, LockIcon, PlusIcon, SearchIcon, TrashIcon, XIcon } from "./icons";
 
