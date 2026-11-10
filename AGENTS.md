@@ -75,11 +75,21 @@ npm run start -- -p 12000
   stylesheets across and a `MutationObserver` on `<html>` keeps the theme class
   in step, otherwise the floating window renders unstyled and light.
 - Study mode is automatic: sharing a screen is the only input. The panel
-  samples the screen on an interval, compares a 16x16 greyscale signature, and
-  asks the vision model by itself once the page settles. A cooldown after each
-  ask stops the answer from re-triggering on its own repaint. There is no play
-  button, and the transcript is never written to storage, so it disappears when
-  the panel closes.
+  samples the screen and asks the vision model by itself. A still page is the
+  normal case, so the first settled page is read even though nothing "changed";
+  comparing only against the previous frame means a worksheet that never moves
+  is never read at all, which is the bug this replaced. Reads are compared
+  against the last page that was *read*, so a page is read once and a noisy
+  screen is not read over and over. There is no play button, and the transcript
+  is never written to storage, so it disappears when the panel closes.
+- The auto loop yields while an answer streams, so the answer's own repaint is
+  not read as a new page. A question the user types is the exception: it passes
+  `explicit`, runs during a stream, and never falls back to the default prompt.
+  Without that flag the ask box silently sent "Read this and solve the question
+  on screen." instead of what was typed.
+- In-flight requests are tracked in a `Set` rather than a single ref. One ref
+  means a second request clears the first one's handle, so aborting on close
+  leaves the other stream running and the busy flag is cleared too early.
 - The panel is a `position: fixed` card, so it sits on top of the shared screen
   and the model can read the card instead of the assignment. Two escapes: the
   minimize control collapses it to a header-only pill, and "Float on top" moves

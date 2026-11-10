@@ -10,6 +10,7 @@ import {
   canCaptureScreen,
   frameSignature,
   grabFrame,
+  isBlankSignature,
   pipApi,
   primeVideo,
   signatureDistance,
@@ -27,10 +28,19 @@ import {
 
 /** How often the screen is sampled for changes. */
 const WATCH_INTERVAL_MS = 1500;
-/** Minimum signature change before an automatic scan fires. */
-const CHANGE_THRESHOLD = 0.02;
 /** Ticks to wait after a scan, so the answer does not re-trigger on itself. */
-const COOLDOWN_TICKS = 5;
+const COOLDOWN_TICKS = 6;
+/**
+ * How different two frames must be to count as a new page. A still worksheet
+ * sits at 0; cursor movement and video playback stay under this; a page turn or
+ * a scroll clears it. Frames are compared against the last page that was read,
+ * not the previous frame, so a page that is simply noisy still reads once.
+ */
+const CHANGE_THRESHOLD = 0.06;
+/** Identical samples in a row before a new page counts as settled. */
+const SETTLE_TICKS = 2;
+/** Upper bound on settling, so a looping animation cannot stall the reader. */
+const MAX_SETTLE_TICKS = 6;
 /** Most turns kept on screen. */
 const MAX_TURNS = 12;
 
@@ -41,9 +51,6 @@ interface Turn {
   shot: string;
   error?: string;
 }
-
-/** Coarse view of what a frame looks like. */
-type Scene = "unknown" | "text" | "blank";
 
 /**
  * Study mode. Share a screen and the panel reads it for you: it samples the
@@ -68,12 +75,14 @@ export function StudyMode({ open, onClose }: { open: boolean; onClose: () => voi
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const lastSignature = useRef<string | null>(null);
   const cooldown = useRef(0);
   const busyRef = useRef(false);
   const pausedRef = useRef(false);
-  const sceneRef = useRef<Scene>("unknown");
-  const abortRef = useRef<AbortController | null>(null);
+  /** Signature of the page we last read, and the candidate next one. */
+  const readSignature = useRef<string | null>(null);
+  const pendingSignature = useRef<string | null>(null);
+  const settleTicks = useRef(0);
+  const inFlight = useRef<Set<AbortController>>(new Set());
   const idRef = useRef(0);
 
   useEffect(() => {
@@ -86,7 +95,7 @@ export function StudyMode({ open, onClose }: { open: boolean; onClose: () => voi
   /** Runs one question against a captured frame, streaming into the turn. */
   const ask = useCallback(async (attachment: Attachment, question: string, id: string) => {
     const controller = new AbortController();
-    abortRef.current = controller;
+    inFlight.current.add(controller);
     setBusy(true);
     try {
       const model = routeModel({ hasImages: true, hasAudio: false, prompt: question });
@@ -111,25 +120,35 @@ export function StudyMode({ open, onClose }: { open: boolean; onClose: () => voi
           : "Could not read the screen.";
       setTurns((prev) => prev.map((t) => (t.id === id ? { ...t, error: message } : t)));
     } finally {
-      abortRef.current = null;
-      setBusy(false);
+      inFlight.current.delete(controller);
+      // Only clear the busy flag once every request has finished, so a typed
+      // question that overlaps an auto answer does not read as "idle" early.
+      if (inFlight.current.size === 0) setBusy(false);
     }
   }, []);
 
-  /** Grabs a frame and asks about it. Used by the auto loop and the ask box. */
+  /**
+   * Grabs a frame and asks about it. Used by the auto loop and the ask box.
+   * `explicit` marks a question the user typed: it runs even while another
+   * answer is streaming, and it never falls back to the default prompt.
+   */
   const scan = useCallback(
-    (question?: string) => {
+    (question?: string, explicit = false) => {
       const video = videoRef.current;
-      if (!video || !streamRef.current || busyRef.current) return;
+      if (!video || !streamRef.current) return;
+      const asked = question?.trim() ?? "";
+      // The auto loop stays quiet while an answer streams; a typed question
+      // must not, or "hello" would be dropped on the floor mid-answer.
+      if (busyRef.current && !explicit) return;
+      if (explicit && !asked) return;
+
       const attachment = grabFrame(video, "Screen");
       if (!attachment) return;
 
-      lastSignature.current = frameSignature(video);
       cooldown.current = COOLDOWN_TICKS;
-      sceneRef.current = "unknown";
 
       const id = `t${idRef.current++}`;
-      const text = question?.trim() || "Read this and solve the question on screen.";
+      const text = asked || "Read this and solve the question on screen.";
       setTurns((prev) =>
         [...prev, { id, question: text, answer: "", shot: attachment.dataUrl }].slice(-MAX_TURNS),
       );
@@ -139,12 +158,14 @@ export function StudyMode({ open, onClose }: { open: boolean; onClose: () => voi
   );
 
   const stopShare = useCallback(() => {
-    abortRef.current?.abort();
+    for (const controller of inFlight.current) controller.abort();
+    inFlight.current.clear();
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
-    lastSignature.current = null;
     cooldown.current = 0;
-    sceneRef.current = "unknown";
+    readSignature.current = null;
+    pendingSignature.current = null;
+    settleTicks.current = 0;
     setSharing(false);
     setBusy(false);
   }, []);
@@ -161,8 +182,9 @@ export function StudyMode({ open, onClose }: { open: boolean; onClose: () => voi
       streamRef.current = stream;
       await primeVideo(stream, video);
       stream.getVideoTracks()[0]?.addEventListener("ended", stopShare);
-      lastSignature.current = null;
-      sceneRef.current = "unknown";
+      readSignature.current = null;
+      pendingSignature.current = null;
+      settleTicks.current = 0;
       cooldown.current = 0;
       setPaused(false);
       setSharing(true);
@@ -171,33 +193,47 @@ export function StudyMode({ open, onClose }: { open: boolean; onClose: () => voi
     }
   }, [stopShare]);
 
-  // The auto-reader. It samples the screen and asks the model by itself, so a
-  // new question on screen becomes an answer with nothing to press.
+  // The auto-reader. It samples the screen and asks the vision model about it
+  // by itself. A still page is the normal case, so the very first settled page
+  // is read even though nothing "changed", and the next page is read when it
+  // appears. A page is read once: reads are compared against the last page that
+  // was read, which is what stops a noisy screen from being read repeatedly.
   useEffect(() => {
     if (!sharing || paused) return;
     const timer = window.setInterval(() => {
       const video = videoRef.current;
       if (!video || busyRef.current || pausedRef.current) return;
       const signature = frameSignature(video);
-      if (!signature) return;
+      if (!signature || isBlankSignature(signature)) return;
 
-      const previous = lastSignature.current;
-      const changed = !previous || signatureDistance(previous, signature) >= CHANGE_THRESHOLD;
-      if (!changed) return;
-
-      lastSignature.current = signature;
+      const read = readSignature.current;
+      // Identical to the page already answered: nothing to do.
+      if (read && signatureDistance(signature, read) < CHANGE_THRESHOLD) {
+        pendingSignature.current = null;
+        settleTicks.current = 0;
+        return;
+      }
+      // Back off after a read, so the answer's own repaint is not read as new.
       if (cooldown.current > 0) {
         cooldown.current -= 1;
         return;
       }
+      // A new page: hold it and wait for it to stop moving, so a half-scrolled
+      // or still-loading page is not read mid-flight.
+      const pending = pendingSignature.current;
+      if (!pending || signatureDistance(signature, pending) >= CHANGE_THRESHOLD) {
+        pendingSignature.current = signature;
+        settleTicks.current = 1;
+        return;
+      }
+      settleTicks.current += 1;
+      // Read once it holds still, or anyway after a while so a page with a
+      // looping animation in the corner cannot stall the reader forever.
+      if (settleTicks.current < SETTLE_TICKS && settleTicks.current < MAX_SETTLE_TICKS) return;
 
-      // Wait for the page to settle before asking, so a half-scrolled or
-      // still-loading page is not read. Two stable samples is enough.
-      const scene = classifyScene(video);
-      const settled = scene !== "blank" && scene === sceneRef.current;
-      sceneRef.current = scene;
-      if (!settled) return;
-
+      readSignature.current = signature;
+      pendingSignature.current = null;
+      settleTicks.current = 0;
       scan();
     }, WATCH_INTERVAL_MS);
     return () => window.clearInterval(timer);
@@ -349,7 +385,7 @@ export function StudyMode({ open, onClose }: { open: boolean; onClose: () => voi
                     const q = draft;
                     setDraft("");
                     setAskOpen(false);
-                    scan(q);
+                    scan(q, true);
                   }
                   if (e.key === "Escape") setAskOpen(false);
                 }}
@@ -403,28 +439,6 @@ function PlayGlyph() {
       <path d="M8 5.6c0-.8.9-1.3 1.6-.9l8.3 5.5c.6.4.6 1.3 0 1.7l-8.3 5.5c-.7.4-1.6-.1-1.6-.9Z" />
     </svg>
   );
-}
-
-/**
- * Coarse read of the frame: is there anything to look at? A near-uniform
- * frame is a blank page or a loading screen, which is not worth asking about.
- */
-function classifyScene(video: HTMLVideoElement): Scene {
-  const canvas = document.createElement("canvas");
-  canvas.width = 32;
-  canvas.height = 32;
-  const ctx = canvas.getContext("2d", { willReadFrequently: true });
-  if (!ctx) return "unknown";
-  ctx.drawImage(video, 0, 0, 32, 32);
-  const { data } = ctx.getImageData(0, 0, 32, 32);
-  let min = 255;
-  let max = 0;
-  for (let i = 0; i < data.length; i += 4) {
-    const grey = (data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114) | 0;
-    if (grey < min) min = grey;
-    if (grey > max) max = grey;
-  }
-  return max - min < 12 ? "blank" : "text";
 }
 
 /** Copies every stylesheet and font rule into the floating window's head. */

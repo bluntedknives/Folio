@@ -158,3 +158,21 @@ export function signatureDistance(a: string, b: string): number {
   }
   return diff / (a.length * 255);
 }
+
+/**
+ * True when a frame is a single flat colour, which is what the screen looks
+ * like for the first moments of a share. Reading one wastes a call and comes
+ * back as "there is nothing here", so it is worth skipping. Works off the
+ * signature, so it costs no extra pixel read.
+ */
+export function isBlankSignature(signature: string): boolean {
+  if (!signature) return true;
+  let min = 255;
+  let max = 0;
+  for (let i = 0; i < signature.length; i++) {
+    const grey = signature.charCodeAt(i);
+    if (grey < min) min = grey;
+    if (grey > max) max = grey;
+  }
+  return max - min < 10;
+}
