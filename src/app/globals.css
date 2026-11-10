@@ -1,0 +1,785 @@
+@import "tailwindcss";
+
+/*
+  Design tokens. Light is the default; `.dark` on <html> flips the ramp.
+  The ramp runs dark-on-light in light mode and light-on-dark in dark mode, so
+  component classes (text-ink-900, bg-ink-100, border-stroke) stay identical
+  across themes and nothing has to branch.
+*/
+:root {
+  --ink-000: #ffffff;
+  --ink-050: #f7f8f8;
+  --ink-100: #ffffff;
+  --ink-150: #f0f2f4;
+  --ink-200: #e8ebee;
+  --ink-250: #dfe3e7;
+  --ink-300: #d3d8de;
+  --ink-350: #c4cad1;
+  --ink-400: #aab1b9;
+  --ink-450: #8e969f;
+  --ink-500: #7c848d;
+  --ink-600: #5f676f;
+  --ink-700: #4a5259;
+  --ink-800: #31383e;
+  --ink-900: #14181c;
+
+  --stroke: rgba(17, 24, 32, 0.11);
+  --stroke-strong: rgba(17, 24, 32, 0.19);
+  --stroke-faint: rgba(17, 24, 32, 0.06);
+
+  --accent: #0f9b8e;
+  --accent-dim: #0b7d72;
+  --accent-glow: rgba(15, 155, 142, 0.16);
+  --danger: #d93b3b;
+  --ok: #17a34a;
+
+  /* Filled controls invert against the page in each theme. */
+  --solid-bg: #14181c;
+  --solid-fg: #ffffff;
+
+  /* Curve palette: saturated enough to read on white. */
+  --g1: #0f9b8e;
+  --g2: #2563eb;
+  --g3: #dc2626;
+  --g4: #b45309;
+  --g5: #15803d;
+  --g6: #7c3aed;
+
+  --radius-sm: 8px;
+  --radius: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 22px;
+
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+
+  color-scheme: light;
+}
+
+.dark {
+  --ink-000: #050607;
+  --ink-050: #0d0f11;
+  --ink-100: #17191c;
+  --ink-150: #1f2226;
+  --ink-200: #26292e;
+  --ink-250: #2e3238;
+  --ink-300: #383d43;
+  --ink-350: #454b52;
+  --ink-400: #565d65;
+  --ink-450: #6b737c;
+  --ink-500: #838b94;
+  --ink-600: #9aa2ab;
+  --ink-700: #b3bac2;
+  --ink-800: #ccd2d8;
+  --ink-900: #f2f4f6;
+
+  --stroke: rgba(255, 255, 255, 0.09);
+  --stroke-strong: rgba(255, 255, 255, 0.16);
+  --stroke-faint: rgba(255, 255, 255, 0.05);
+
+  --accent: #2dd4bf;
+  --accent-dim: #14b8a6;
+  --accent-glow: rgba(45, 212, 191, 0.16);
+  --danger: #f87171;
+  --ok: #4ade80;
+
+  --solid-bg: #f2f4f6;
+  --solid-fg: #14181c;
+
+  /* Curve palette: brightened for the dark canvas. */
+  --g1: #2dd4bf;
+  --g2: #7aa2f7;
+  --g3: #f7768e;
+  --g4: #e0af68;
+  --g5: #9ece6a;
+  --g6: #bb9af7;
+
+  color-scheme: dark;
+}
+
+@theme inline {
+  --color-ink-000: var(--ink-000);
+  --color-ink-050: var(--ink-050);
+  --color-ink-100: var(--ink-100);
+  --color-ink-150: var(--ink-150);
+  --color-ink-200: var(--ink-200);
+  --color-ink-250: var(--ink-250);
+  --color-ink-300: var(--ink-300);
+  --color-ink-350: var(--ink-350);
+  --color-ink-400: var(--ink-400);
+  --color-ink-450: var(--ink-450);
+  --color-ink-500: var(--ink-500);
+  --color-ink-600: var(--ink-600);
+  --color-ink-700: var(--ink-700);
+  --color-ink-800: var(--ink-800);
+  --color-ink-900: var(--ink-900);
+  --color-stroke: var(--stroke);
+  --color-stroke-strong: var(--stroke-strong);
+  --color-accent: var(--accent);
+  --color-accent-dim: var(--accent-dim);
+  --color-danger: var(--danger);
+  --color-ok: var(--ok);
+  --color-solid: var(--solid-bg);
+  --color-solid-fg: var(--solid-fg);
+
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, "SF Mono", monospace;
+
+  --radius-sm: var(--radius-sm);
+  --radius: var(--radius);
+  --radius-lg: var(--radius-lg);
+  --radius-xl: var(--radius-xl);
+
+  --ease-out: var(--ease-out);
+  --ease-in-out: var(--ease-in-out);
+}
+
+* {
+  border-color: var(--stroke);
+}
+
+html,
+body {
+  background: var(--ink-050);
+  color: var(--ink-900);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Cross-fade colours during a manual toggle, then drop the class so it never
+   interferes with component hover transitions. */
+.theme-anim,
+.theme-anim *,
+.theme-anim *::before,
+.theme-anim *::after {
+  transition:
+    background-color 0.22s ease,
+    border-color 0.22s ease,
+    color 0.22s ease !important;
+}
+
+::selection {
+  background: var(--accent-glow);
+  color: var(--ink-900);
+}
+
+/* Hairline scrollbars, no track chrome. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--ink-400) transparent;
+}
+*::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--ink-300);
+  border-radius: 99px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--ink-500);
+  background-clip: content-box;
+}
+
+:focus-visible {
+  outline: 1.5px solid var(--accent-dim);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+button {
+  cursor: pointer;
+}
+button:disabled {
+  cursor: default;
+}
+
+textarea,
+input {
+  font: inherit;
+}
+
+/* ---------- entrance ---------- */
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(9px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+
+@keyframes pulse-soft {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 0.9;
+  }
+}
+
+.rise {
+  animation: rise 0.42s var(--ease-out) both;
+}
+.fade {
+  animation: fade 0.3s var(--ease-out) both;
+}
+
+.shimmer {
+  background: linear-gradient(
+    90deg,
+    var(--ink-600) 0%,
+    var(--ink-900) 45%,
+    var(--ink-600) 90%
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: shimmer 2.1s linear infinite;
+}
+
+.thinking-dot {
+  animation: pulse-soft 1.3s var(--ease-in-out) infinite;
+}
+
+/* ---------- working indicator ---------- */
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes working-sheen {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+
+@keyframes dot-bounce {
+  0%,
+  70%,
+  100% {
+    opacity: 0.25;
+    transform: translateY(0);
+  }
+  35% {
+    opacity: 0.9;
+    transform: translateY(-2px);
+  }
+}
+
+.spin {
+  animation: spin 0.9s linear infinite;
+}
+
+/* Slow sheen travelling across the label so it reads as "still going". */
+.working-label {
+  background: linear-gradient(
+    90deg,
+    var(--ink-600) 0%,
+    var(--ink-800) 40%,
+    var(--ink-900) 50%,
+    var(--ink-800) 60%,
+    var(--ink-600) 100%
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: working-sheen 2.4s linear infinite;
+}
+
+.working-dot {
+  width: 3px;
+  height: 3px;
+  border-radius: 99px;
+  background: var(--ink-600);
+  animation: dot-bounce 1.4s var(--ease-in-out) infinite;
+}
+.working-dot:nth-child(2) {
+  animation-delay: 0.18s;
+}
+.working-dot:nth-child(3) {
+  animation-delay: 0.36s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+/* ---------- markdown ---------- */
+
+.md {
+  font-size: 0.9375rem;
+  line-height: 1.72;
+  color: var(--ink-800);
+  overflow-wrap: anywhere;
+}
+.md > *:first-child {
+  margin-top: 0;
+}
+.md > *:last-child {
+  margin-bottom: 0;
+}
+.md p {
+  margin: 0.7em 0;
+}
+.md h1,
+.md h2,
+.md h3,
+.md h4 {
+  color: var(--ink-900);
+  font-weight: 560;
+  letter-spacing: -0.012em;
+  margin: 1.5em 0 0.55em;
+  line-height: 1.3;
+}
+.md h1 {
+  font-size: 1.28em;
+}
+.md h2 {
+  font-size: 1.13em;
+}
+.md h3 {
+  font-size: 1em;
+}
+.md h4 {
+  font-size: 0.95em;
+  color: var(--ink-800);
+}
+.md strong {
+  color: var(--ink-900);
+  font-weight: 560;
+}
+.md em {
+  color: var(--ink-800);
+}
+.md a {
+  color: var(--accent);
+  text-decoration: none;
+  border-bottom: 1px solid color-mix(in oklab, var(--accent) 35%, transparent);
+}
+.md a:hover {
+  border-bottom-color: var(--accent);
+}
+.md ul,
+.md ol {
+  margin: 0.7em 0;
+  padding-left: 1.35em;
+}
+.md li {
+  margin: 0.3em 0;
+}
+.md li::marker {
+  color: var(--ink-600);
+}
+.md ul ul,
+.md ol ol,
+.md ul ol,
+.md ol ul {
+  margin: 0.25em 0;
+}
+.md blockquote {
+  margin: 0.9em 0;
+  padding: 0.15em 0 0.15em 1em;
+  border-left: 2px solid var(--stroke-strong);
+  color: var(--ink-700);
+}
+.md hr {
+  margin: 1.6em 0;
+  border: 0;
+  border-top: 1px solid var(--stroke);
+}
+.md code {
+  font-family: var(--font-mono);
+  font-size: 0.86em;
+  background: var(--ink-200);
+  border: 1px solid var(--stroke);
+  border-radius: 5px;
+  padding: 0.12em 0.38em;
+  color: var(--ink-900);
+}
+.md pre code {
+  background: none;
+  border: 0;
+  padding: 0;
+  font-size: 0.83rem;
+  line-height: 1.65;
+}
+.md table {
+  width: 100%;
+  margin: 1em 0;
+  border-collapse: collapse;
+  font-size: 0.9em;
+  display: block;
+  overflow-x: auto;
+}
+.md th,
+.md td {
+  border: 1px solid var(--stroke);
+  padding: 0.5em 0.7em;
+  text-align: left;
+}
+.md th {
+  background: var(--ink-150);
+  color: var(--ink-900);
+  font-weight: 550;
+}
+.md img {
+  max-width: 100%;
+  border-radius: var(--radius);
+  border: 1px solid var(--stroke);
+}
+
+.md .katex-display {
+  margin: 1.1em 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.2em 0;
+}
+.md .katex {
+  font-size: 1.02em;
+}
+
+/* ---------- code blocks ---------- */
+
+.code-shell {
+  margin: 1em 0;
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius);
+  background: var(--ink-050);
+  overflow: hidden;
+}
+.code-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.42rem 0.5rem 0.42rem 0.8rem;
+  background: var(--ink-100);
+  border-bottom: 1px solid var(--stroke);
+}
+.code-lang {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--ink-600);
+}
+.code-body {
+  overflow-x: auto;
+}
+.code-body pre {
+  margin: 0;
+  padding: 0.95rem 1.05rem;
+  background: transparent !important;
+}
+.hljs {
+  background: transparent !important;
+  color: var(--ink-800);
+}
+
+/*
+  highlight.js ships a dark theme. In light mode the token colours are too
+  pale to read on white, so remap them here rather than loading a second
+  stylesheet and swapping it at runtime.
+*/
+:root:not(.dark) .hljs-comment,
+:root:not(.dark) .hljs-quote {
+  color: #6a737d;
+}
+:root:not(.dark) .hljs-keyword,
+:root:not(.dark) .hljs-selector-tag,
+:root:not(.dark) .hljs-literal,
+:root:not(.dark) .hljs-type {
+  color: #cf222e;
+}
+:root:not(.dark) .hljs-string,
+:root:not(.dark) .hljs-regexp,
+:root:not(.dark) .hljs-addition {
+  color: #0a3069;
+}
+:root:not(.dark) .hljs-number,
+:root:not(.dark) .hljs-built_in,
+:root:not(.dark) .hljs-symbol {
+  color: #953800;
+}
+:root:not(.dark) .hljs-title,
+:root:not(.dark) .hljs-title.function_,
+:root:not(.dark) .hljs-section {
+  color: #8250df;
+}
+:root:not(.dark) .hljs-attr,
+:root:not(.dark) .hljs-attribute,
+:root:not(.dark) .hljs-variable,
+:root:not(.dark) .hljs-template-variable {
+  color: #0550ae;
+}
+:root:not(.dark) .hljs-name,
+:root:not(.dark) .hljs-selector-id,
+:root:not(.dark) .hljs-selector-class {
+  color: #116329;
+}
+:root:not(.dark) .hljs-meta,
+:root:not(.dark) .hljs-doctag {
+  color: #6639ba;
+}
+:root:not(.dark) .hljs-deletion {
+  color: #82071e;
+}
+:root:not(.dark) .hljs-emphasis {
+  font-style: italic;
+}
+:root:not(.dark) .hljs-strong {
+  font-weight: 600;
+}
+
+/* ---------- code copy ---------- */
+
+.code-copy {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.2rem 0.5rem;
+  border-radius: 6px;
+  font-size: 0.6875rem;
+  color: var(--ink-600);
+  transition: color 0.16s, background-color 0.16s;
+}
+.code-copy:hover {
+  background: var(--ink-250);
+  color: var(--ink-800);
+}
+
+/* ---------- graphs ---------- */
+
+.graph-shell {
+  margin: 1em 0;
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius);
+  background: var(--ink-050);
+  overflow: hidden;
+}
+.graph-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.42rem 0.5rem 0.42rem 0.8rem;
+  background: var(--ink-100);
+  border-bottom: 1px solid var(--stroke);
+}
+.graph-lang {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--ink-600);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.graph-reset {
+  flex-shrink: 0;
+  padding: 0.2rem 0.5rem;
+  border-radius: 6px;
+  font-size: 0.6875rem;
+  color: var(--ink-600);
+  transition: color 0.16s, background-color 0.16s;
+}
+.graph-reset:hover {
+  background: var(--ink-250);
+  color: var(--ink-800);
+}
+.graph-svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  touch-action: none;
+  cursor: crosshair;
+}
+.graph-tick {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  fill: var(--ink-600);
+}
+.graph-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+.graph-foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.9rem;
+  padding: 0.5rem 0.8rem;
+  border-top: 1px solid var(--stroke);
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  color: var(--ink-700);
+}
+.graph-readout {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+.graph-swatch {
+  width: 8px;
+  height: 2px;
+  border-radius: 99px;
+}
+
+/* ---------- compact thinking ---------- */
+
+.md-think {
+  font-size: 0.8125rem;
+  line-height: 1.62;
+  color: var(--ink-600);
+}
+.md-think h1,
+.md-think h2,
+.md-think h3,
+.md-think h4 {
+  font-size: 0.8125rem;
+  margin: 1em 0 0.35em;
+  color: var(--ink-700);
+  font-weight: 560;
+}
+.md-think p {
+  margin: 0.45em 0;
+}
+.md-think strong {
+  color: var(--ink-800);
+  font-weight: 560;
+}
+.md-think ul,
+.md-think ol {
+  margin: 0.45em 0;
+  padding-left: 1.2em;
+}
+.md-think li {
+  margin: 0.18em 0;
+}
+.md-think code {
+  font-size: 0.8em;
+  background: var(--ink-200);
+}
+.md-think .katex {
+  font-size: 0.96em;
+}
+.md-think .code-shell,
+.md-think .graph-shell {
+  margin: 0.6em 0;
+}
+
+/* ---------- shared controls ---------- */
+
+.icon-button {
+  display: flex;
+  height: 2rem;
+  width: 2rem;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  color: var(--ink-600);
+  transition:
+    color 0.16s,
+    background-color 0.16s;
+}
+.icon-button:hover {
+  background: var(--ink-200);
+  color: var(--ink-900);
+}
+
+/* ---------- plotter ---------- */
+
+.plotter-label {
+  display: block;
+  margin-bottom: 0.35rem;
+  font-size: 0.6875rem;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-500);
+}
+.plotter-input {
+  width: 100%;
+  border-radius: 8px;
+  border: 1px solid var(--stroke);
+  background: var(--ink-100);
+  padding: 0.42rem 0.6rem;
+  font-size: 0.8125rem;
+  color: var(--ink-900);
+  outline: none;
+  transition:
+    border-color 0.16s,
+    background-color 0.16s;
+}
+.plotter-input:hover {
+  border-color: var(--ink-350);
+}
+.plotter-input:focus {
+  border-color: var(--ink-450);
+  background: var(--ink-150);
+}
+.plotter-input::placeholder {
+  color: var(--ink-500);
+}
+.plotter-empty {
+  display: flex;
+  min-height: 8rem;
+  align-items: center;
+  justify-content: center;
+  border: 1px dashed var(--stroke-strong);
+  border-radius: var(--radius);
+  padding: 1rem;
+  text-align: center;
+  font-size: 0.8125rem;
+  color: var(--ink-600);
+}
+
+/* ---------- graph additions ---------- */
+
+.graph-error {
+  padding: 0.6rem 0.8rem;
+  font-size: 0.8125rem;
+  color: var(--ink-600);
+}
