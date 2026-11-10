@@ -20,7 +20,11 @@ import { Markdown } from "./Markdown";
 import {
   ChevronDownIcon,
   ChevronUpIcon,
+  CollapseIcon,
+  ExpandIcon,
+  NextIcon,
   PauseIcon,
+  PlayIcon,
   PopOutIcon,
   ScreenIcon,
   XIcon,
@@ -28,7 +32,7 @@ import {
 
 /** How often the screen is sampled for changes. */
 const WATCH_INTERVAL_MS = 1500;
-/** Ticks to wait after a scan, so the answer does not re-trigger on itself. */
+/** Ticks to wait after a read, so the answer's own repaint is not read again. */
 const COOLDOWN_TICKS = 6;
 /**
  * How different two frames must be to count as a new page. A still worksheet
@@ -41,25 +45,43 @@ const CHANGE_THRESHOLD = 0.06;
 const SETTLE_TICKS = 2;
 /** Upper bound on settling, so a looping animation cannot stall the reader. */
 const MAX_SETTLE_TICKS = 6;
-/** Most turns kept on screen. */
+/** Characters of an answer revealed per second, so it plays like a video. */
+const REVEAL_CPS = 44;
+/** How often the reveal advances, in ms. */
+const REVEAL_TICK_MS = 90;
+/** The question the reader asks when the user has not typed one. */
+const DEFAULT_QUESTION = "Read this and solve the question on screen.";
+/** Most turns kept. Only the newest is shown; the rest are history. */
 const MAX_TURNS = 12;
 
 interface Turn {
   id: string;
   question: string;
   answer: string;
-  shot: string;
   error?: string;
 }
 
+function clock(total: number): string {
+  const m = Math.floor(total / 60)
+    .toString()
+    .padStart(2, "0");
+  const s = Math.floor(total % 60)
+    .toString()
+    .padStart(2, "0");
+  return `${m}:${s}`;
+}
+
 /**
- * Study mode. Share a screen and the panel reads it for you: it samples the
- * screen, notices when the page changes, and asks the vision model about the
- * new page on its own. There is no play button and no transcript to manage.
+ * Study mode, built as a media player. Sharing a screen puts the live screen on
+ * the stage as the video, and the answer plays out beneath it, revealed a
+ * character at a time like playback. Pausing holds both: the reader stops
+ * looking and the answer stops playing. Pressing play reads whatever is on
+ * screen now, so the user controls when a page is read.
  *
- * Nothing here is persisted. Turns live in this component's memory, are never
- * written to localStorage, and are dropped the moment the panel closes, so a
- * browser extension reading the page or the site's storage sees an empty chat.
+ * The stage shows the same frame the model is given, so what is on screen is
+ * exactly what is read. Nothing here is persisted: turns live in this
+ * component's memory and are dropped when the panel closes, so an extension
+ * reading the page or the site's storage sees an empty chat.
  */
 export function StudyMode({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [sharing, setSharing] = useState(false);
@@ -67,13 +89,18 @@ export function StudyMode({ open, onClose }: { open: boolean; onClose: () => voi
   const [busy, setBusy] = useState(false);
   const [paused, setPaused] = useState(false);
   const [turns, setTurns] = useState<Turn[]>([]);
+  const [revealed, setRevealed] = useState<Record<string, number>>({});
+  const [elapsed, setElapsed] = useState(0);
   const [pipWindow, setPipWindow] = useState<Window | null>(null);
   const [askOpen, setAskOpen] = useState(false);
   const [draft, setDraft] = useState("");
-  /** Collapsed to a small pill, so the panel covers as little as possible. */
+  const [isFull, setIsFull] = useState(false);
+  /** Collapsed to a small pill, so the player covers as little as possible. */
   const [minimized, setMinimized] = useState(false);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const captionRef = useRef<HTMLDivElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const cooldown = useRef(0);
   const busyRef = useRef(false);
@@ -84,6 +111,9 @@ export function StudyMode({ open, onClose }: { open: boolean; onClose: () => voi
   const settleTicks = useRef(0);
   const inFlight = useRef<Set<AbortController>>(new Set());
   const idRef = useRef(0);
+  const turnsRef = useRef<Turn[]>([]);
+  /** Whether the caption is pinned to the bottom, like a live transcript. */
+  const stick = useRef(true);
 
   useEffect(() => {
     busyRef.current = busy;
@@ -91,6 +121,9 @@ export function StudyMode({ open, onClose }: { open: boolean; onClose: () => voi
   useEffect(() => {
     pausedRef.current = paused;
   }, [paused]);
+  useEffect(() => {
+    turnsRef.current = turns;
+  }, [turns]);
 
   /** Runs one question against a captured frame, streaming into the turn. */
   const ask = useCallback(async (attachment: Attachment, question: string, id: string) => {
@@ -128,19 +161,16 @@ export function StudyMode({ open, onClose }: { open: boolean; onClose: () => voi
   }, []);
 
   /**
-   * Grabs a frame and asks about it. Used by the auto loop and the ask box.
-   * `explicit` marks a question the user typed: it runs even while another
-   * answer is streaming, and it never falls back to the default prompt.
+   * Grabs a frame and asks about it. Used by the auto reader, the ask box and
+   * the skip control. `explicit` marks a deliberate read: it runs even while
+   * another answer streams, so a typed question is never dropped.
    */
   const scan = useCallback(
     (question?: string, explicit = false) => {
       const video = videoRef.current;
       if (!video || !streamRef.current) return;
       const asked = question?.trim() ?? "";
-      // The auto loop stays quiet while an answer streams; a typed question
-      // must not, or "hello" would be dropped on the floor mid-answer.
       if (busyRef.current && !explicit) return;
-      if (explicit && !asked) return;
 
       const attachment = grabFrame(video, "Screen");
       if (!attachment) return;
@@ -148,14 +178,30 @@ export function StudyMode({ open, onClose }: { open: boolean; onClose: () => voi
       cooldown.current = COOLDOWN_TICKS;
 
       const id = `t${idRef.current++}`;
-      const text = asked || "Read this and solve the question on screen.";
-      setTurns((prev) =>
-        [...prev, { id, question: text, answer: "", shot: attachment.dataUrl }].slice(-MAX_TURNS),
-      );
+      const text = asked || DEFAULT_QUESTION;
+      setTurns((prev) => [...prev, { id, question: text, answer: "" }].slice(-MAX_TURNS));
+      setRevealed((prev) => ({ ...prev, [id]: 0 }));
+      stick.current = true;
       void ask(attachment, text, id);
     },
     [ask],
   );
+
+  /**
+   * Resumes play. If the screen has moved on while paused, it reads the new
+   * page right away instead of waiting for the next sample, so unpausing
+   * captures whatever is on screen at that moment.
+   */
+  const resume = useCallback(() => {
+    setPaused(false);
+    const video = videoRef.current;
+    if (!video) return;
+    const signature = frameSignature(video);
+    const read = readSignature.current;
+    if (signature && (!read || signatureDistance(signature, read) >= CHANGE_THRESHOLD)) {
+      scan(undefined, true);
+    }
+  }, [scan]);
 
   const stopShare = useCallback(() => {
     for (const controller of inFlight.current) controller.abort();
@@ -186,6 +232,7 @@ export function StudyMode({ open, onClose }: { open: boolean; onClose: () => voi
       pendingSignature.current = null;
       settleTicks.current = 0;
       cooldown.current = 0;
+      setElapsed(0);
       setPaused(false);
       setSharing(true);
     } catch (err) {
@@ -193,13 +240,12 @@ export function StudyMode({ open, onClose }: { open: boolean; onClose: () => voi
     }
   }, [stopShare]);
 
-  // The auto-reader. It samples the screen and asks the vision model about it
-  // by itself. A still page is the normal case, so the very first settled page
-  // is read even though nothing "changed", and the next page is read when it
-  // appears. A page is read once: reads are compared against the last page that
-  // was read, which is what stops a noisy screen from being read repeatedly.
+  // The auto reader. It samples the screen and asks the vision model about it
+  // by itself. A still page is the normal case, so the first settled page is
+  // read even though nothing "changed". Reads are compared against the last
+  // page that was read, so a page is read once rather than over and over.
   useEffect(() => {
-    if (!sharing || paused) return;
+    if (!open || !sharing || paused) return;
     const timer = window.setInterval(() => {
       const video = videoRef.current;
       if (!video || busyRef.current || pausedRef.current) return;
@@ -207,19 +253,15 @@ export function StudyMode({ open, onClose }: { open: boolean; onClose: () => voi
       if (!signature || isBlankSignature(signature)) return;
 
       const read = readSignature.current;
-      // Identical to the page already answered: nothing to do.
       if (read && signatureDistance(signature, read) < CHANGE_THRESHOLD) {
         pendingSignature.current = null;
         settleTicks.current = 0;
         return;
       }
-      // Back off after a read, so the answer's own repaint is not read as new.
       if (cooldown.current > 0) {
         cooldown.current -= 1;
         return;
       }
-      // A new page: hold it and wait for it to stop moving, so a half-scrolled
-      // or still-loading page is not read mid-flight.
       const pending = pendingSignature.current;
       if (!pending || signatureDistance(signature, pending) >= CHANGE_THRESHOLD) {
         pendingSignature.current = signature;
@@ -227,8 +269,6 @@ export function StudyMode({ open, onClose }: { open: boolean; onClose: () => voi
         return;
       }
       settleTicks.current += 1;
-      // Read once it holds still, or anyway after a while so a page with a
-      // looping animation in the corner cannot stall the reader forever.
       if (settleTicks.current < SETTLE_TICKS && settleTicks.current < MAX_SETTLE_TICKS) return;
 
       readSignature.current = signature;
@@ -237,76 +277,114 @@ export function StudyMode({ open, onClose }: { open: boolean; onClose: () => voi
       scan();
     }, WATCH_INTERVAL_MS);
     return () => window.clearInterval(timer);
-  }, [sharing, paused, scan]);
+  }, [open, sharing, paused, scan]);
+
+  // The reveal. Buffered text plays out at a readable speed, so the answer
+  // arrives like a video rather than snapping into place. Pausing stops it.
+  useEffect(() => {
+    if (!open || paused) return;
+    const perTick = Math.max(1, Math.round((REVEAL_CPS * REVEAL_TICK_MS) / 1000));
+    const timer = window.setInterval(() => {
+      setRevealed((prev) => {
+        let changed = false;
+        const next = { ...prev };
+        for (const t of turnsRef.current) {
+          if (t.error) continue;
+          const cur = next[t.id] ?? 0;
+          if (cur < t.answer.length) {
+            next[t.id] = Math.min(t.answer.length, cur + perTick);
+            changed = true;
+          }
+        }
+        return changed ? next : prev;
+      });
+    }, REVEAL_TICK_MS);
+    return () => window.clearInterval(timer);
+  }, [open, paused]);
+
+  // Elapsed time, held while paused, exactly like a player.
+  useEffect(() => {
+    if (!open || !sharing || paused) return;
+    const timer = window.setInterval(() => setElapsed((e) => e + 1), 1000);
+    return () => window.clearInterval(timer);
+  }, [open, sharing, paused]);
+
+  // Follow the reveal, unless the user has scrolled up to read something.
+  useEffect(() => {
+    const el = captionRef.current;
+    if (el && stick.current) el.scrollTop = el.scrollHeight;
+  }, [revealed, turns]);
+
+  useEffect(() => {
+    const onFs = () => setIsFull(Boolean(document.fullscreenElement));
+    document.addEventListener("fullscreenchange", onFs);
+    return () => document.removeEventListener("fullscreenchange", onFs);
+  }, []);
 
   // Releasing the stream on unmount stops the browser's sharing indicator.
   useEffect(() => stopShare, [stopShare]);
 
   const popOut = useCallback(async () => {
-    if (pipWindow) return;
-    const api = pipApi();
-    if (!api) {
-      setError("This browser cannot float the panel. It stays in this tab instead.");
-      return;
-    }
+    const pip = pipApi();
+    if (!pip) return;
     try {
-      const pip = await api.requestWindow({ width: 420, height: 580 });
-      copyStyles(document, pip.document);
-      pip.document.body.className = document.body.className;
-      pip.addEventListener("pagehide", () => setPipWindow(null));
-      setPipWindow(pip);
+      const win = await pip.requestWindow({ width: 460, height: 640 });
+      copyStyles(document, win.document);
+      const observer = new MutationObserver(() => {
+        win.document.documentElement.className = document.documentElement.className;
+      });
+      observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
+      win.addEventListener("pagehide", () => observer.disconnect());
+      setPipWindow(win);
     } catch {
-      setError("The floating window was blocked. It stays in this tab instead.");
+      setError("The floating window could not open.");
     }
-  }, [pipWindow]);
-
-  useEffect(() => {
-    if (!pipWindow) return;
-    const sync = () => copyStyles(document, pipWindow.document);
-    const observer = new MutationObserver(sync);
-    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
-    return () => observer.disconnect();
-  }, [pipWindow]);
+  }, []);
 
   const close = useCallback(() => {
     pipWindow?.close();
     setPipWindow(null);
     stopShare();
     setTurns([]);
-    setAskOpen(false);
-    setDraft("");
+    setRevealed({});
+    setElapsed(0);
     onClose();
   }, [pipWindow, stopShare, onClose]);
+
+  const toggleFull = useCallback(() => {
+    const el = panelRef.current;
+    if (!el) return;
+    if (document.fullscreenElement) void document.exitFullscreen();
+    else void el.requestFullscreen?.();
+  }, []);
+
+  const onCaptionScroll = useCallback(() => {
+    const el = captionRef.current;
+    if (!el) return;
+    stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 28;
+  }, []);
 
   if (!open) return null;
 
   const collapsed = minimized && !pipWindow;
+  const current = turns.length ? turns[turns.length - 1] : null;
+  const shownCount = current ? (revealed[current.id] ?? 0) : 0;
+  const shown = current ? current.answer.slice(0, shownCount) : "";
+  const playing = Boolean(current && shownCount < current.answer.length);
 
   const panel = (
     <div
-      className={`study-panel ${pipWindow ? "study-floating" : ""} ${collapsed ? "study-mini" : ""}`}
+      ref={panelRef}
+      className={`study-panel study-player ${pipWindow ? "study-floating" : ""} ${
+        collapsed ? "study-mini" : ""
+      }`}
       aria-label="Study mode"
     >
       <div className="study-head">
         <ScreenIcon className="h-4 w-4 text-ink-700" />
-        <span className="text-[0.875rem] font-medium text-ink-900">Study mode</span>
-        {sharing && (
-          <span className="study-status">
-            {paused ? "Paused" : busy ? "Reading…" : "Reading your screen"}
-          </span>
-        )}
+        <span className="text-[0.875rem] font-medium text-ink-900">Study</span>
+        {sharing && <span className="study-status">{paused ? "Paused" : "Live"}</span>}
         <div className="ml-auto flex items-center gap-1">
-          {sharing && (
-            <button
-              type="button"
-              onClick={() => setPaused((p) => !p)}
-              aria-label={paused ? "Resume" : "Pause"}
-              title={paused ? "Resume" : "Pause"}
-              className="icon-button h-7 w-7"
-            >
-              {paused ? <PlayGlyph /> : <PauseIcon className="h-3.5 w-3.5" />}
-            </button>
-          )}
           {!pipWindow && (
             <button
               type="button"
@@ -315,7 +393,11 @@ export function StudyMode({ open, onClose }: { open: boolean; onClose: () => voi
               title={minimized ? "Expand" : "Minimize"}
               className="icon-button h-7 w-7"
             >
-              {minimized ? <ChevronUpIcon className="h-4 w-4" /> : <ChevronDownIcon className="h-4 w-4" />}
+              {minimized ? (
+                <ChevronUpIcon className="h-4 w-4" />
+              ) : (
+                <ChevronDownIcon className="h-4 w-4" />
+              )}
             </button>
           )}
           {!pipWindow && pipApi() && (
@@ -341,104 +423,168 @@ export function StudyMode({ open, onClose }: { open: boolean; onClose: () => voi
         </div>
       </div>
 
-      {!collapsed && error && <p className="study-error">{error}</p>}
-
       {!collapsed && (
-        <div className="study-thread">
-          {!sharing ? (
-            <div className="study-placeholder">
-              <ScreenIcon className="h-5 w-5" />
-              <p className="mt-2 max-w-[16rem] text-center text-[0.8125rem] text-ink-600">
-                {canCaptureScreen()
-                  ? "Share your screen and open the assignment. It reads each new page for you."
-                  : "Screen sharing is not available in this browser."}
-              </p>
+        <>
+          <div className="study-stage">
+            <video ref={videoRef} playsInline muted aria-hidden />
+            {!sharing && (
+              <div className="study-stage-idle">
+                <ScreenIcon className="h-5 w-5" />
+                <p>
+                  {canCaptureScreen()
+                    ? "Share your screen to begin. Answers play here."
+                    : "Screen sharing is not available in this browser."}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => void beginShare()}
+                  disabled={!canCaptureScreen()}
+                  className="study-btn study-btn-primary"
+                >
+                  <ScreenIcon className="h-4 w-4" />
+                  Share screen
+                </button>
+              </div>
+            )}
+            {sharing && paused && (
               <button
                 type="button"
-                onClick={() => void beginShare()}
-                disabled={!canCaptureScreen()}
-                className="study-btn study-btn-primary mt-3"
+                onClick={resume}
+                aria-label="Play"
+                title="Play"
+                className="study-bigplay"
               >
-                <ScreenIcon className="h-4 w-4" />
-                Share screen
+                <PlayIcon className="h-5 w-5" />
               </button>
-            </div>
-          ) : turns.length === 0 ? (
-            <p className="study-hint">Watching your screen. Answers appear here on their own.</p>
-          ) : (
-            turns.map((t) => <TurnView key={t.id} turn={t} />)
-          )}
-        </div>
-      )}
+            )}
+            {sharing && (
+              <span className={`study-veil ${paused ? "study-veil-paused" : ""}`}>
+                <span className="study-veil-dot" />
+                {paused ? "Paused" : busy ? "Reading" : playing ? "Answering" : "Watching"}
+              </span>
+            )}
+            {sharing && error && (
+              <span className="study-veil study-veil-error">
+                <span className="study-veil-dot" />
+                {error}
+              </span>
+            )}
+          </div>
 
-      {!collapsed && sharing && (
-        <div className="study-foot">
-          {askOpen ? (
-            <div className="study-ask">
-              <input
-                value={draft}
-                autoFocus
-                onChange={(e) => setDraft(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.nativeEvent.isComposing) {
-                    e.preventDefault();
-                    const q = draft;
-                    setDraft("");
-                    setAskOpen(false);
-                    scan(q, true);
-                  }
-                  if (e.key === "Escape") setAskOpen(false);
-                }}
-                placeholder="Ask about the screen…"
-                aria-label="Ask about the screen"
-                className="study-input"
-              />
-            </div>
-          ) : (
-            <button type="button" onClick={() => setAskOpen(true)} className="study-ask-toggle">
-              Ask about the screen
-            </button>
+          {sharing && (
+            <>
+              <div className="study-transport">
+                <button
+                  type="button"
+                  onClick={() => (paused ? resume() : setPaused(true))}
+                  aria-label={paused ? "Play" : "Pause"}
+                  title={paused ? "Play" : "Pause"}
+                  className="icon-button h-7 w-7"
+                >
+                  {paused ? (
+                    <PlayIcon className="h-3.5 w-3.5" />
+                  ) : (
+                    <PauseIcon className="h-3.5 w-3.5" />
+                  )}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => scan(undefined, true)}
+                  aria-label="Next page"
+                  title="Read the screen again"
+                  className="icon-button h-7 w-7"
+                >
+                  <NextIcon className="h-3.5 w-3.5" />
+                </button>
+                <span className="study-time">{clock(elapsed)}</span>
+                <span className="study-spacer" />
+                {!pipWindow && (
+                  <button
+                    type="button"
+                    onClick={toggleFull}
+                    aria-label={isFull ? "Exit full screen" : "Full screen"}
+                    title={isFull ? "Exit full screen" : "Full screen"}
+                    className="icon-button h-7 w-7"
+                  >
+                    {isFull ? (
+                      <CollapseIcon className="h-4 w-4" />
+                    ) : (
+                      <ExpandIcon className="h-4 w-4" />
+                    )}
+                  </button>
+                )}
+              </div>
+              <div className="study-progress">
+                {!paused && <div className="study-progress-fill" />}
+              </div>
+            </>
           )}
-        </div>
-      )}
 
-      <video ref={videoRef} playsInline muted aria-hidden className="hidden" />
+          <div className="study-caption" ref={captionRef} onScroll={onCaptionScroll}>
+            {!current ? (
+              <p className="study-caption-empty">
+                {sharing
+                  ? "Watching your screen. The answer plays here on its own."
+                  : "Nothing yet. Share a screen and open the assignment."}
+              </p>
+            ) : (
+              <>
+                <p className="study-now">
+                  Now: <strong>{current.question}</strong>
+                </p>
+                {current.error ? (
+                  <p className="study-error">{current.error}</p>
+                ) : shown ? (
+                  <div className="study-answer study-block">
+                    <Markdown>{shown}</Markdown>
+                    {playing && !paused && <span className="study-caret" />}
+                  </div>
+                ) : (
+                  <p className="study-thinking">
+                    <span className="study-dot" />
+                    Reading…
+                  </p>
+                )}
+              </>
+            )}
+          </div>
+
+          {sharing && (
+            <div className="study-foot">
+              {askOpen ? (
+                <div className="study-ask">
+                  <input
+                    value={draft}
+                    autoFocus
+                    onChange={(e) => setDraft(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && !e.nativeEvent.isComposing) {
+                        e.preventDefault();
+                        const q = draft;
+                        setDraft("");
+                        setAskOpen(false);
+                        scan(q, true);
+                      }
+                      if (e.key === "Escape") setAskOpen(false);
+                    }}
+                    placeholder="Ask about the screen…"
+                    aria-label="Ask about the screen"
+                    className="study-input"
+                  />
+                </div>
+              ) : (
+                <button type="button" onClick={() => setAskOpen(true)} className="study-ask-toggle">
+                  Ask about the screen
+                </button>
+              )}
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 
   return pipWindow ? createPortal(panel, pipWindow.document.body) : panel;
-}
-
-function TurnView({ turn }: { turn: Turn }) {
-  return (
-    <div className="study-turn">
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={turn.shot} alt="" className="study-thumb" />
-      <div className="study-turn-body">
-        {turn.error ? (
-          <p className="study-error">{turn.error}</p>
-        ) : turn.answer.trim() ? (
-          <div className="study-answer">
-            <Markdown>{turn.answer}</Markdown>
-          </div>
-        ) : (
-          <p className="study-thinking">
-            <span className="study-dot" />
-            Reading…
-          </p>
-        )}
-      </div>
-    </div>
-  );
-}
-
-/** Inline play triangle for the resume control. */
-function PlayGlyph() {
-  return (
-    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden className="h-3.5 w-3.5">
-      <path d="M8 5.6c0-.8.9-1.3 1.6-.9l8.3 5.5c.6.4.6 1.3 0 1.7l-8.3 5.5c-.7.4-1.6-.1-1.6-.9Z" />
-    </svg>
-  );
 }
 
 /** Copies every stylesheet and font rule into the floating window's head. */

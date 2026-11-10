@@ -56,14 +56,21 @@ export function Chat() {
 
   // Open the most recent chat once the store has hydrated. The model is chosen
   // per message, so there is nothing else to restore.
+  //
+  // Hydration must not clobber work the user has already started: typing, or
+  // pressing New chat, before the store is ready would otherwise be silently
+  // replaced by the most recent stored chat and an empty record saved over it.
   useEffect(() => {
     let cancelled = false;
     void storeReady().then(() => {
       if (cancelled) return;
       const list = listConversations();
       setSummaries(list);
-      const mostRecent = list[0] ? readConversation(list[0].id) : null;
-      setConversation(mostRecent ?? emptyConversation());
+      setConversation((current) => {
+        if (current) return current;
+        const mostRecent = list[0] ? readConversation(list[0].id) : null;
+        return mostRecent ?? emptyConversation();
+      });
       setHydrated(true);
     });
     return () => {
@@ -71,17 +78,26 @@ export function Chat() {
     };
   }, []);
 
-  // Debounced persistence: a stream changes the conversation on every token,
-  // and re-encoding the whole record (images included) each time would stutter.
+  // Persistence: a stream changes the conversation on every token, and
+  // re-encoding the whole record (images included) each time would stutter, so
+  // writes are debounced while streaming. Once the stream stops the write is
+  // immediate: a reload right after a reply must not lose the reply, and the
+  // `pagehide` flush cannot be relied on, since an IndexedDB write started
+  // there may not finish before the page is torn down.
   useEffect(() => {
     if (!hydrated || !conversation) return;
     latest.current = conversation;
+    if (!streaming) {
+      writeConversation(conversation);
+      setSummaries(listConversations());
+      return;
+    }
     const timer = window.setTimeout(() => {
       writeConversation(conversation);
       setSummaries(listConversations());
     }, 400);
     return () => window.clearTimeout(timer);
-  }, [conversation, hydrated]);
+  }, [conversation, hydrated, streaming]);
 
   // Flush the pending write if the tab closes mid-stream.
   useEffect(() => {
@@ -208,7 +224,7 @@ export function Chat() {
       const assistantId = newId();
       const history = [...conversation.messages, userMessage];
 
-      setConversation({
+      const next: Conversation = {
         ...conversation,
         title: deriveTitle(history),
         messages: [
@@ -222,7 +238,12 @@ export function Chat() {
           },
         ],
         updatedAt: Date.now(),
-      });
+      };
+      setConversation(next);
+      // Write the user's message straight away. Waiting for the debounce means
+      // a reload in the first second after sending loses the question.
+      writeConversation(next);
+      setSummaries(listConversations());
 
       await runTurn(history, assistantId, model, label, text);
     },
@@ -268,7 +289,12 @@ export function Chat() {
 
   const startNew = useCallback(() => {
     abortRef.current?.abort();
-    setConversation(emptyConversation());
+    const conv = emptyConversation();
+    setConversation(conv);
+    // Persist immediately rather than waiting for the debounce, so a new chat
+    // that is never typed into still exists in the sidebar after a reload.
+    writeConversation(conv);
+    setSummaries(listConversations());
     setSidebarOpen(false);
   }, []);
 

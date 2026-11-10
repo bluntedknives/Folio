@@ -280,6 +280,34 @@ export function PauseIcon({ className }: IconProps) {
   );
 }
 
+/** Skip to the next page, for jumping the reader to a fresh capture. */
+export function NextIcon({ className }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden className={className}>
+      <path d="M6.4 5.6c0-.7.8-1.2 1.4-.8l7.2 5.4c.5.4.5 1.2 0 1.6l-7.2 5.4c-.6.4-1.4 0-1.4-.8Z" />
+      <rect x="16.4" y="5.2" width="2.6" height="13.6" rx="1.1" />
+    </svg>
+  );
+}
+
+/** Four corners, the "fill the screen" affordance on a player. */
+export function ExpandIcon({ className }: IconProps) {
+  return (
+    <svg {...base} className={className}>
+      <path d="M9 4H5.4A1.4 1.4 0 0 0 4 5.4V9M15 4h3.6A1.4 1.4 0 0 1 20 5.4V9M9 20H5.4A1.4 1.4 0 0 1 4 18.6V15M15 20h3.6a1.4 1.4 0 0 0 1.4-1.4V15" />
+    </svg>
+  );
+}
+
+/** Four corners turned inward, for leaving full screen. */
+export function CollapseIcon({ className }: IconProps) {
+  return (
+    <svg {...base} className={className}>
+      <path d="M4 9h3.6A1.4 1.4 0 0 0 9 7.6V4M20 9h-3.6A1.4 1.4 0 0 1 15 7.6V4M4 15h3.6A1.4 1.4 0 0 1 9 16.4V20M20 15h-3.6a1.4 1.4 0 0 0-1.4 1.4V20" />
+    </svg>
+  );
+}
+
 /** Chevron pointing up, for expanding the collapsed panel. */
 export function ChevronUpIcon({ className }: IconProps) {
   return (

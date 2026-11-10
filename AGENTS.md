@@ -74,19 +74,34 @@ npm run start -- -p 12000
   document while the DOM lives in the floating window. `copyStyles` clones the
   stylesheets across and a `MutationObserver` on `<html>` keeps the theme class
   in step, otherwise the floating window renders unstyled and light.
-- Study mode is automatic: sharing a screen is the only input. The panel
-  samples the screen and asks the vision model by itself. A still page is the
-  normal case, so the first settled page is read even though nothing "changed";
-  comparing only against the previous frame means a worksheet that never moves
-  is never read at all, which is the bug this replaced. Reads are compared
-  against the last page that was *read*, so a page is read once and a noisy
-  screen is not read over and over. There is no play button, and the transcript
-  is never written to storage, so it disappears when the panel closes.
+- Study mode is built as a media player, because that is the mental model the
+  user asked for. The live screen sits on a 16:9 stage as the video, the answer
+  plays out beneath it, revealed a character at a time, and the transport
+  mirrors a player: play/pause, next page, elapsed time, full screen. The stage
+  shows the same frame the model is given, so what is on screen is exactly what
+  is read. Nothing is written to storage, so the transcript is gone when the
+  panel closes.
+- Pause holds both halves: the reader stops sampling and the reveal stops
+  advancing. Resuming reads the screen immediately if it moved while paused,
+  rather than waiting for the next sample, so unpausing captures whatever is on
+  screen at that moment.
+- Study mode is automatic: sharing a screen is the only input. A still page is
+  the normal case, so the first settled page is read even though nothing
+  "changed"; comparing only against the previous frame means a worksheet that
+  never moves is never read at all, which is the bug this replaced. Reads are
+  compared against the last page that was *read*, so a page is read once and a
+  noisy screen is not read over and over. A frame that is a single flat colour
+  is skipped, so the blank screen at share time is not read.
 - The auto loop yields while an answer streams, so the answer's own repaint is
   not read as a new page. A question the user types is the exception: it passes
   `explicit`, runs during a stream, and never falls back to the default prompt.
   Without that flag the ask box silently sent "Read this and solve the question
   on screen." instead of what was typed.
+- Chat persistence has two rules that are easy to regress. A sent message is
+  written immediately, not on the debounce: reloading within the first second
+  after sending used to lose the question entirely. And hydrate must not
+  overwrite a conversation the user has already started, or typing before the
+  store is ready is silently replaced by the most recent stored chat.
 - In-flight requests are tracked in a `Set` rather than a single ref. One ref
   means a second request clears the first one's handle, so aborting on close
   leaves the other stream running and the busy flag is cleared too early.
