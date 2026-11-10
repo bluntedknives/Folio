@@ -74,11 +74,29 @@ npm run start -- -p 12000
   document while the DOM lives in the floating window. `copyStyles` clones the
   stylesheets across and a `MutationObserver` on `<html>` keeps the theme class
   in step, otherwise the floating window renders unstyled and light.
-- The PiP window is a separate document, so anything the panel renders must be
-  inside the portal; selectors and `document.querySelector` in the main tab do
-  not see it. In headless Chromium the PiP window opens but is not composited.
-- Frames from `capture.ts` go through a canvas before leaving, which is what
-  drops metadata from a shared screen, exactly like an uploaded image. The
-  watch loop compares a 16x16 greyscale signature and only re-scans when the
-  screen settles on something new; the threshold ignores cursor movement and
-  video playback.
+- Study mode is automatic: sharing a screen is the only input. The panel
+  samples the screen on an interval, compares a 16x16 greyscale signature, and
+  asks the vision model by itself once the page settles. A cooldown after each
+  ask stops the answer from re-triggering on its own repaint. There is no play
+  button, and the transcript is never written to storage, so it disappears when
+  the panel closes.
+- The panel is a `position: fixed` card, so it sits on top of the shared screen
+  and the model can read the card instead of the assignment. Two escapes: the
+  minimize control collapses it to a header-only pill, and "Float on top" moves
+  it into a Document Picture-in-Picture window, which is a separate OS window
+  and so never appears in a screen capture of the page.
+- Captured frames are geometrically complete. Verified by painting marker blocks
+  in all four corners of a 1440x1200 source and sampling the corners of the
+  bytes actually sent upstream: all four arrive, full size, correct aspect. If a
+  capture ever looks cropped, check the thumbnail: `object-fit: cover` on a
+  4:3 box crops the sides of a wide frame. It uses `contain` for that reason.
+- A PiP window's document is separate: anything the panel renders must be inside
+  the portal, and a stylesheet copy plus a MutationObserver on `<html>` keeps the
+  theme class in step. In headless Chromium the PiP window opens but is not
+  composited.
+- History lives in IndexedDB, not localStorage, because a browser extension's
+  content script shares the page's localStorage and can read it. The object
+  store is keyed by `id`, so the payload rides in a `data` field: putting the
+  encoded string in directly fails with a DataError, since a string has no `id`
+  property. Legacy localStorage records are always swept on hydrate and moved
+  across, and a record already in IndexedDB wins so a re-run cannot clobber it.

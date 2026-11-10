@@ -269,3 +269,31 @@ export function PopOutIcon({ className }: IconProps) {
     </svg>
   );
 }
+
+/** Two bars, for holding the auto-scanner. */
+export function PauseIcon({ className }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden className={className}>
+      <rect x="7" y="5.5" width="3.4" height="13" rx="1.1" />
+      <rect x="13.6" y="5.5" width="3.4" height="13" rx="1.1" />
+    </svg>
+  );
+}
+
+/** Chevron pointing up, for expanding the collapsed panel. */
+export function ChevronUpIcon({ className }: IconProps) {
+  return (
+    <svg {...base} className={className}>
+      <path d="m6 14 6-6 6 6" />
+    </svg>
+  );
+}
+
+/** Chevron pointing down, for collapsing the panel to a pill. */
+export function ChevronDownIcon({ className }: IconProps) {
+  return (
+    <svg {...base} className={className}>
+      <path d="m6 10 6 6 6-6" />
+    </svg>
+  );
+}

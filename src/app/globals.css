@@ -922,15 +922,16 @@ input {
 
 /* ---------- study mode (screen share overlay) ---------- */
 
-/* Hosts the in-page panel and the portalled one inside the PiP window. */
+/* The panel is the whole document inside a floating window, and a card in the
+   page otherwise. */
 .study-panel {
   position: fixed;
   right: 1rem;
   bottom: 1rem;
   z-index: 50;
   display: flex;
-  width: min(24rem, calc(100vw - 2rem));
-  max-height: min(34rem, calc(100vh - 2rem));
+  width: min(23rem, calc(100vw - 2rem));
+  max-height: min(33rem, calc(100vh - 2rem));
   flex-direction: column;
   overflow: hidden;
   border: 1px solid var(--stroke-strong);
@@ -942,8 +943,16 @@ input {
   animation: study-in 0.32s var(--ease-out);
 }
 
-/* Inside the PiP window the panel is the whole document, so it drops the
-   floating chrome and fills the frame. */
+/* Collapsed to a header-only pill, for keeping the view clear while the
+   reader keeps working in the background. */
+.study-mini {
+  width: auto;
+  max-height: none;
+}
+.study-mini .study-status {
+  display: none;
+}
+
 .study-floating {
   position: static;
   inset: auto;
@@ -975,64 +984,32 @@ input {
   border-bottom: 1px solid var(--stroke);
 }
 
-/* Pulsing dot shown while the screen is being shared. */
-.study-live {
-  width: 0.4rem;
-  height: 0.4rem;
+/* Quiet status text beside the title, e.g. "Reading your screen". */
+.study-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.6875rem;
+  color: var(--ink-500);
+}
+.study-status::before {
+  content: "";
+  width: 0.375rem;
+  height: 0.375rem;
   border-radius: 50%;
-  background: var(--danger);
-  box-shadow: 0 0 0 0 var(--danger);
-  animation: study-pulse 1.8s var(--ease-in-out) infinite;
+  background: var(--ok);
+  animation: study-breathe 1.9s var(--ease-in-out) infinite;
 }
-@keyframes study-pulse {
-  0% {
-    box-shadow: 0 0 0 0 color-mix(in oklab, var(--danger) 55%, transparent);
-  }
-  70% {
-    box-shadow: 0 0 0 0.4rem transparent;
-  }
+@keyframes study-breathe {
+  0%,
   100% {
-    box-shadow: 0 0 0 0 transparent;
+    opacity: 0.35;
+    transform: scale(0.85);
   }
-}
-
-.study-stage {
-  position: relative;
-  display: flex;
-  min-height: 8rem;
-  max-height: 11rem;
-  align-items: center;
-  justify-content: center;
-  overflow: hidden;
-  border-bottom: 1px solid var(--stroke);
-  background: var(--ink-050);
-}
-.study-shot {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-.study-placeholder {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 1.25rem;
-  color: var(--ink-450);
-}
-.study-watch-badge {
-  position: absolute;
-  top: 0.5rem;
-  left: 0.5rem;
-  border-radius: 999px;
-  background: color-mix(in oklab, var(--ink-000) 82%, transparent);
-  padding: 0.15rem 0.5rem;
-  font-size: 0.625rem;
-  font-weight: 500;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--ink-700);
-  backdrop-filter: blur(6px);
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
 
 .study-error {
@@ -1043,22 +1020,126 @@ input {
   color: var(--danger);
 }
 
-.study-controls {
-  display: flex;
-  gap: 0.4rem;
-  padding: 0.6rem 0.9rem;
-  border-bottom: 1px solid var(--stroke);
+.study-thread {
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0.5rem 0.6rem 0.75rem;
 }
+.study-hint {
+  margin: 0;
+  padding: 1.25rem 0.5rem;
+  text-align: center;
+  font-size: 0.75rem;
+  color: var(--ink-500);
+}
+.study-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem 1.25rem;
+  color: var(--ink-450);
+}
+
+/* One captured page and its answer. */
+.study-turn {
+  display: flex;
+  gap: 0.6rem;
+  padding: 0.55rem 0.3rem;
+  border-bottom: 1px solid var(--stroke-faint);
+  animation: study-in 0.28s var(--ease-out);
+}
+.study-turn:last-child {
+  border-bottom: 0;
+}
+/* Shows the whole captured frame. `cover` would crop the sides, which reads as
+   the capture being cut off even though the model receives all of it. */
+.study-thumb {
+  width: 3.75rem;
+  height: 2.75rem;
+  flex-shrink: 0;
+  border-radius: 8px;
+  border: 1px solid var(--stroke);
+  background: #fff;
+  object-fit: contain;
+}
+.study-turn-body {
+  min-width: 0;
+  flex: 1;
+  font-size: 0.8125rem;
+}
+.study-answer {
+  font-size: 0.8125rem;
+}
+.study-thinking {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--ink-500);
+}
+.study-dot {
+  width: 0.4rem;
+  height: 0.4rem;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: study-breathe 1.2s var(--ease-in-out) infinite;
+}
+
+.study-foot {
+  border-top: 1px solid var(--stroke);
+  padding: 0.5rem 0.6rem;
+}
+.study-ask-toggle {
+  width: 100%;
+  border-radius: 999px;
+  border: 1px solid var(--stroke);
+  background: var(--ink-150);
+  padding: 0.4rem 0.75rem;
+  font-size: 0.8125rem;
+  color: var(--ink-600);
+  text-align: left;
+  transition:
+    background-color 0.16s,
+    color 0.16s;
+}
+.study-ask-toggle:hover {
+  background: var(--ink-200);
+  color: var(--ink-900);
+}
+.study-ask {
+  display: flex;
+  align-items: center;
+}
+.study-input {
+  width: 100%;
+  border-radius: 999px;
+  border: 1px solid var(--stroke);
+  background: var(--ink-150);
+  padding: 0.4rem 0.75rem;
+  font-size: 0.8125rem;
+  color: var(--ink-900);
+  outline: none;
+}
+.study-input:focus {
+  border-color: var(--ink-400);
+}
+.study-input::placeholder {
+  color: var(--ink-500);
+}
+
 .study-btn {
   display: inline-flex;
-  flex: 1;
   align-items: center;
   justify-content: center;
   gap: 0.4rem;
   border-radius: 999px;
   border: 1px solid var(--stroke);
   background: var(--ink-150);
-  padding: 0.42rem 0.75rem;
+  padding: 0.42rem 0.9rem;
   font-size: 0.8125rem;
   font-weight: 500;
   color: var(--ink-800);
@@ -1084,73 +1165,4 @@ input {
 .study-btn-primary:hover:not(:disabled) {
   background: var(--solid-bg);
   opacity: 0.9;
-}
-.study-btn-on {
-  border-color: color-mix(in oklab, var(--accent) 45%, transparent);
-  background: var(--accent-glow);
-  color: var(--accent);
-}
-
-.study-ask {
-  display: flex;
-  align-items: center;
-  gap: 0.35rem;
-  padding: 0.55rem 0.9rem;
-  border-bottom: 1px solid var(--stroke);
-}
-.study-input {
-  min-width: 0;
-  flex: 1;
-  border: 0;
-  background: transparent;
-  font-size: 0.8125rem;
-  color: var(--ink-900);
-  outline: none;
-}
-.study-input::placeholder {
-  color: var(--ink-500);
-}
-.study-send {
-  display: flex;
-  height: 1.75rem;
-  width: 1.75rem;
-  flex-shrink: 0;
-  align-items: center;
-  justify-content: center;
-  border-radius: 50%;
-  background: var(--ink-250);
-  color: var(--ink-500);
-  transition:
-    background-color 0.16s,
-    color 0.16s;
-}
-.study-send-active {
-  background: var(--solid-bg);
-  color: var(--solid-fg);
-}
-.study-send-active:hover {
-  opacity: 0.9;
-}
-
-.study-thread {
-  min-height: 0;
-  flex: 1;
-  overflow-y: auto;
-  overscroll-contain: contain;
-  padding: 0.75rem 0.9rem 1rem;
-}
-.study-hint {
-  margin: 0;
-  padding: 0.5rem 0;
-  text-align: center;
-  font-size: 0.75rem;
-  color: var(--ink-500);
-}
-.study-question {
-  margin: 0 0 0.5rem;
-  font-size: 0.75rem;
-  color: var(--ink-500);
-}
-.study-answer {
-  font-size: 0.8125rem;
 }

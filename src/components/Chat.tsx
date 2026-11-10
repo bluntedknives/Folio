@@ -7,11 +7,11 @@ import { ChatError, streamChat } from "@/lib/api";
 import {
   deleteConversation as removeConversation,
   deriveTitle,
-  dropLegacyModelKey,
   emptyConversation,
   listConversations,
   newId,
   readConversation,
+  ready as storeReady,
   writeConversation,
   type ConversationSummary,
 } from "@/lib/store";
@@ -54,15 +54,21 @@ export function Chat() {
   const pinnedRef = useRef(true);
   const latest = useRef<Conversation | null>(null);
 
-  // Open the most recent chat. The model is chosen per message, so there is
-  // nothing else to restore.
+  // Open the most recent chat once the store has hydrated. The model is chosen
+  // per message, so there is nothing else to restore.
   useEffect(() => {
-    dropLegacyModelKey();
-    const list = listConversations();
-    setSummaries(list);
-    const mostRecent = list[0] ? readConversation(list[0].id) : null;
-    setConversation(mostRecent ?? emptyConversation());
-    setHydrated(true);
+    let cancelled = false;
+    void storeReady().then(() => {
+      if (cancelled) return;
+      const list = listConversations();
+      setSummaries(list);
+      const mostRecent = list[0] ? readConversation(list[0].id) : null;
+      setConversation(mostRecent ?? emptyConversation());
+      setHydrated(true);
+    });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // Debounced persistence: a stream changes the conversation on every token,
@@ -317,14 +323,7 @@ export function Chat() {
         onAsk={(text) => void send(text, [])}
       />
 
-      <StudyMode
-        open={studyOpen}
-        onClose={() => setStudyOpen(false)}
-        messages={messages}
-        streaming={streaming}
-        onAsk={(text, attachments) => void send(text, attachments)}
-        onStop={stop}
-      />
+      <StudyMode open={studyOpen} onClose={() => setStudyOpen(false)} />
 
       <main className="relative flex min-w-0 flex-1 flex-col">
         <header className="flex h-14 shrink-0 items-center gap-1.5 px-3 sm:px-5">

@@ -4,25 +4,173 @@ import type { Conversation, ChatMessage } from "./types";
 /**
  * Local-only persistence. There is no account and nothing is uploaded.
  *
- * The record is stored under an opaque key and the payload is base64-encoded
- * JSON. This is obfuscation, not encryption: it keeps the history from being
- * casually readable in devtools or greppable in a shared browser profile.
- * Anyone with access to the machine can still decode it, so the UI says so.
+ * History lives in IndexedDB rather than localStorage. The point is isolation:
+ * a content script injected by a browser extension shares the page's
+ * localStorage and can read it directly, but it cannot reach the page's
+ * IndexedDB. Records are base64-encoded JSON on top of that, which is
+ * obfuscation rather than encryption: it keeps the history from being casually
+ * readable in devtools. Anyone with access to the machine can still decode it,
+ * so the UI says so.
+ *
+ * Reads are synchronous and served from an in-memory cache that `ready()`
+ * fills once per page load. Writes update the cache immediately and persist in
+ * the background, so the UI never waits on the database.
  */
 
-const KEY_PREFIX = STORE_NS;
-const INDEX_KEY = `${KEY_PREFIX}::idx`;
-const RECORD_PREFIX = `${KEY_PREFIX}::r::`;
+const DB_NAME = `${STORE_NS}-v1`;
+const DB_STORE = "convos";
+const LOCAL_PREFIX = STORE_NS;
+
+/** Row shape in IndexedDB: the key is plain, the payload is encoded. */
+interface StoredRow {
+  id: string;
+  data: string;
+}
+
+let cache = new Map<string, Conversation>();
+let readyPromise: Promise<void> | null = null;
+let db: IDBDatabase | null = null;
+
+/** Resolves once the cache is populated. Safe to call more than once. */
+export function ready(): Promise<void> {
+  if (!readyPromise) readyPromise = hydrate();
+  return readyPromise;
+}
+
+async function hydrate(): Promise<void> {
+  db = await openDb();
+  const stored = await idbGetAll();
+  cache = new Map(stored.map((c) => [c.id, c]));
+  // Always sweep localStorage: earlier versions wrote there, extensions can
+  // read it, and records that predate this version still need moving across.
+  await migrateFromLocalStorage();
+  clearLegacyLocal();
+}
+
+function openDb(): Promise<IDBDatabase | null> {
+  return new Promise((resolve) => {
+    if (typeof indexedDB === "undefined") return resolve(null);
+    let request: IDBOpenDBRequest;
+    try {
+      request = indexedDB.open(DB_NAME, 1);
+    } catch {
+      return resolve(null);
+    }
+    request.onupgradeneeded = () => {
+      const database = request.result;
+      if (!database.objectStoreNames.contains(DB_STORE)) {
+        database.createObjectStore(DB_STORE, { keyPath: "id" });
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => resolve(null);
+    request.onblocked = () => resolve(null);
+  });
+}
+
+function idbGetAll(): Promise<Conversation[]> {
+  return new Promise((resolve) => {
+    if (!db) return resolve([]);
+    try {
+      const request = db.transaction(DB_STORE, "readonly").objectStore(DB_STORE).getAll();
+      request.onsuccess = () => {
+        const rows = (request.result as StoredRow[]) ?? [];
+        resolve(rows.map((row) => decode<Conversation>(row.data)).filter((c): c is Conversation => !!c));
+      };
+      request.onerror = () => resolve([]);
+    } catch {
+      resolve([]);
+    }
+  });
+}
 
 /**
- * Drops the key an earlier version used to remember a manually picked model.
- * The model is now chosen per message, so the key is dead weight.
+ * The store is keyed by `id`, so the encoded payload rides in a `data` field
+ * rather than being the value itself: a bare string has no `id` property and
+ * would be rejected as a DataError.
  */
-export function dropLegacyModelKey(): void {
-  const store = storage();
-  if (!store) return;
-  store.removeItem(`${KEY_PREFIX}::model`);
-  for (const legacy of LEGACY_STORE_NS) store.removeItem(`${legacy}::model`);
+function idbPut(conv: Conversation): void {
+  if (!db) return;
+  try {
+    db.transaction(DB_STORE, "readwrite")
+      .objectStore(DB_STORE)
+      .put({ id: conv.id, data: encode(conv) } satisfies StoredRow);
+  } catch {
+    /* quota or a closed connection: the in-memory copy is still correct */
+  }
+}
+
+function idbDelete(id: string): void {
+  if (!db) return;
+  try {
+    db.transaction(DB_STORE, "readwrite").objectStore(DB_STORE).delete(id);
+  } catch {
+    /* ignore */
+  }
+}
+
+function idbClear(): void {
+  if (!db) return;
+  try {
+    db.transaction(DB_STORE, "readwrite").objectStore(DB_STORE).clear();
+  } catch {
+    /* ignore */
+  }
+}
+
+/** One-time move of records written by earlier versions into IndexedDB. */
+async function migrateFromLocalStorage(): Promise<void> {
+  if (typeof window === "undefined") return;
+  const local = safeLocalStorage();
+  if (!local) return;
+
+  for (const ns of [LOCAL_PREFIX, ...LEGACY_STORE_NS]) {
+    const ids = decode<string[]>(local.getItem(`${ns}::idx`) ?? "") ?? [];
+    for (const id of ids) {
+      // A record already in IndexedDB wins, so a re-run never clobbers newer data.
+      if (cache.has(id)) continue;
+      const conv = decode<Conversation>(local.getItem(`${ns}::r::${id}`) ?? "");
+      if (!conv) continue;
+      cache.set(conv.id, conv);
+      idbPut(conv);
+    }
+  }
+  await waitForWrites();
+}
+
+/** Best-effort wait so a migration finishes before the page is torn down. */
+function waitForWrites(): Promise<void> {
+  return new Promise((resolve) => {
+    if (!db) return resolve();
+    try {
+      const tx = db.transaction(DB_STORE, "readwrite");
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => resolve();
+      tx.onabort = () => resolve();
+    } catch {
+      resolve();
+    }
+  });
+}
+
+function clearLegacyLocal(): void {
+  const local = safeLocalStorage();
+  if (!local) return;
+  for (const ns of [LOCAL_PREFIX, ...LEGACY_STORE_NS]) {
+    const ids = decode<string[]>(local.getItem(`${ns}::idx`) ?? "") ?? [];
+    for (const id of ids) local.removeItem(`${ns}::r::${id}`);
+    local.removeItem(`${ns}::idx`);
+    local.removeItem(`${ns}::model`);
+  }
+}
+
+function safeLocalStorage(): Storage | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return window.localStorage;
+  } catch {
+    return null;
+  }
 }
 
 function encode(value: unknown): string {
@@ -46,15 +194,6 @@ function decode<T>(raw: string): T | null {
   }
 }
 
-function storage(): Storage | null {
-  if (typeof window === "undefined") return null;
-  try {
-    return window.localStorage;
-  } catch {
-    return null;
-  }
-}
-
 export interface ConversationSummary {
   id: string;
   title: string;
@@ -62,110 +201,42 @@ export interface ConversationSummary {
   messageCount: number;
 }
 
-let migrated = false;
-
-/**
- * Copies conversations written under an older namespace into the current one.
- * Runs once per page load, and only for ids the current namespace lacks.
- */
-function migrateLegacy(): void {
-  if (migrated) return;
-  migrated = true;
-  const store = storage();
-  if (!store) return;
-
-  for (const legacy of LEGACY_STORE_NS) {
-    const legacyIndex = decode<string[]>(store.getItem(`${legacy}::idx`) ?? "");
-    if (!legacyIndex?.length) continue;
-
-    const currentIds = decode<string[]>(store.getItem(INDEX_KEY) ?? "") ?? [];
-    for (const id of legacyIndex) {
-      if (currentIds.includes(id)) continue;
-      const raw = store.getItem(`${legacy}::r::${id}`);
-      if (!raw) continue;
-      try {
-        store.setItem(RECORD_PREFIX + id, raw);
-        currentIds.push(id);
-      } catch {
-        /* quota: skip this record rather than aborting the migration */
-      }
-    }
-    store.setItem(INDEX_KEY, encode(currentIds));
-  }
-}
-
 export function listConversations(): ConversationSummary[] {
-  const store = storage();
-  if (!store) return [];
-  migrateLegacy();
-  const ids = decode<string[]>(store.getItem(INDEX_KEY) ?? "") ?? [];
-  const out: ConversationSummary[] = [];
-  for (const id of ids) {
-    const conv = readConversation(id);
-    if (!conv) continue;
-    out.push({
+  return [...cache.values()]
+    .map((conv) => ({
       id: conv.id,
       title: conv.title,
       updatedAt: conv.updatedAt,
       messageCount: conv.messages.length,
-    });
-  }
-  return out.sort((a, b) => b.updatedAt - a.updatedAt);
+    }))
+    .sort((a, b) => b.updatedAt - a.updatedAt);
 }
 
 export function readConversation(id: string): Conversation | null {
-  const store = storage();
-  if (!store) return null;
-  return decode<Conversation>(store.getItem(RECORD_PREFIX + id) ?? "");
+  return cache.get(id) ?? null;
 }
 
 export function writeConversation(conv: Conversation): boolean {
-  const store = storage();
-  if (!store) return false;
-  const ids = decode<string[]>(store.getItem(INDEX_KEY) ?? "") ?? [];
-  if (!ids.includes(conv.id)) ids.push(conv.id);
-  try {
-    store.setItem(RECORD_PREFIX + conv.id, encode(conv));
-    store.setItem(INDEX_KEY, encode(ids));
-    return true;
-  } catch {
-    // Almost always the 5 MB quota: images dominate the payload.
-    return false;
-  }
+  cache.set(conv.id, conv);
+  idbPut(conv);
+  return true;
 }
 
 export function deleteConversation(id: string): void {
-  const store = storage();
-  if (!store) return;
-  store.removeItem(RECORD_PREFIX + id);
-  const ids = decode<string[]>(store.getItem(INDEX_KEY) ?? "") ?? [];
-  store.setItem(INDEX_KEY, encode(ids.filter((x) => x !== id)));
+  cache.delete(id);
+  idbDelete(id);
 }
 
 export function clearAll(): void {
-  const store = storage();
-  if (!store) return;
-  for (const id of decode<string[]>(store.getItem(INDEX_KEY) ?? "") ?? []) {
-    store.removeItem(RECORD_PREFIX + id);
-  }
-  store.removeItem(INDEX_KEY);
-  for (const legacy of LEGACY_STORE_NS) {
-    for (const id of decode<string[]>(store.getItem(`${legacy}::idx`) ?? "") ?? []) {
-      store.removeItem(`${legacy}::r::${id}`);
-    }
-    store.removeItem(`${legacy}::idx`);
-  }
+  cache.clear();
+  idbClear();
+  clearLegacyLocal();
 }
 
-/** Rough byte total of everything this app has written, for the clear-data prompt. */
+/** Rough byte total of everything this app has stored, for the clear-data prompt. */
 export function storedBytes(): number {
-  const store = storage();
-  if (!store) return 0;
   let total = 0;
-  for (const id of decode<string[]>(store.getItem(INDEX_KEY) ?? "") ?? []) {
-    total += (store.getItem(RECORD_PREFIX + id) ?? "").length;
-  }
-  total += (store.getItem(INDEX_KEY) ?? "").length;
+  for (const conv of cache.values()) total += JSON.stringify(conv).length;
   return total;
 }
 
