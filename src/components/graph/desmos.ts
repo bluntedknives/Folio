@@ -16,7 +16,7 @@ import { toDesmosLatex } from "@/lib/math/expression";
  */
 
 const SCRIPT_ID = "desmos-api-script";
-const API_VERSION = "v1.11";
+const API_VERSION = "v1.12";
 const TRIAL_KEY = "dcb31709b452b1cf9dc26972add0fda6";
 
 const API_KEY = process.env.NEXT_PUBLIC_DESMOS_API_KEY || TRIAL_KEY;

@@ -51,7 +51,10 @@ export function Graph({ source }: { source: string }) {
 
 export function GraphCanvas({ spec }: { spec: GraphSpec }) {
   const [hoverX, setHoverX] = useState<number | null>(null);
-  const [engine, setEngine] = useState<"local" | "desmos">("local");
+  // Desmos is the default engine, so a graph gets dragging, tracing and tables
+  // out of the box. The built-in plotter stays one click away and takes over
+  // automatically if the Desmos script cannot load.
+  const [engine, setEngine] = useState<"local" | "desmos">("desmos");
   const svgRef = useRef<SVGSVGElement>(null);
   const drag = useRef<{ x: number; y: number; bounds: Bounds } | null>(null);
   // Each instance needs its own clip path id: two graphs on one page would
