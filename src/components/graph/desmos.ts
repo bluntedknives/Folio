@@ -123,10 +123,11 @@ export async function mountDesmos(
     expressions: true,
     settingsMenu: false,
     zoomButtons: true,
-    // Desmos draws on its own canvas, so the theme has to be passed in rather
-    // than inherited from CSS.
+    // `invertedColors` darkens the calculator by inverting the whole canvas,
+    // background included. Setting a dark backgroundColor as well cancels the
+    // inversion out and the graph renders light inside a dark app, so the
+    // background is left to the default and only the flag is toggled.
     invertedColors: dark,
-    backgroundColor: dark ? "#0e1012" : "#ffffff",
     border: false,
     keypad: false,
     expressionsCollapsed: true,
