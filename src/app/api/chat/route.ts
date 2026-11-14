@@ -1,7 +1,7 @@
 import { readChatRequest } from "@/lib/validation";
 import { SYSTEM_PROMPT, getModel, routeFor, thinkingFor } from "@/lib/models";
 import { formatSources, search, shouldSearch } from "@/lib/search";
-import { formatVideo, loadVideo } from "@/lib/youtube-server";
+import { formatUnreadableVideo, formatVideo, loadVideo } from "@/lib/youtube-server";
 import { latestVideoId } from "@/lib/youtube";
 import type { Source, WireMessage, WirePart } from "@/lib/types";
 
@@ -31,11 +31,19 @@ export async function POST(request: Request) {
   // A video question is answered from the video, so search is skipped: the
   // question is usually "what is this" and the open web has nothing to add.
   let sources: Source[] = [];
-  if (!video && parsed.body.query && shouldSearch(parsed.body.query)) {
+  if (!videoId && parsed.body.query && shouldSearch(parsed.body.query)) {
     sources = await search(parsed.body.query);
   }
 
-  const extras = [sources.length ? formatSources(sources) : "", video ? formatVideo(video) : ""]
+  // A linked video that could not be read still has to be acknowledged, or the
+  // model answers as if no video were mentioned.
+  const videoBlock = video
+    ? formatVideo(video)
+    : videoId
+      ? formatUnreadableVideo(videoId)
+      : "";
+
+  const extras = [sources.length ? formatSources(sources) : "", videoBlock]
     .filter(Boolean)
     .join("\n\n");
   const systemPrompt = extras ? `${SYSTEM_PROMPT}\n\n${extras}` : SYSTEM_PROMPT;

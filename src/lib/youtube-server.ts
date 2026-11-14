@@ -266,3 +266,19 @@ export function formatVideo(video: VideoContext): string {
     `${frames} You do not have the audio and you do not have a transcript, so you cannot describe what is said or summarise the spoken content. Say so rather than guessing.`,
   ].join("\n\n");
 }
+
+/**
+ * Renders the block used when the student linked a video but YouTube returned
+ * nothing readable. Without this the model receives no hint that a video was
+ * involved, and answers with a long speculative monologue about being unable
+ * to browse. Telling it plainly that the link could not be read keeps the reply
+ * to one honest line.
+ */
+export function formatUnreadableVideo(videoId: string): string {
+  return [
+    "YouTube video for this question.",
+    `URL: ${WATCH}${videoId}`,
+    "The video's details could not be read, and no frames were loaded. You do not know its title, channel or content.",
+    "Say in one short line that you could not read this video, and offer to help if the student describes it or pastes the relevant text. Do not speculate about why, and do not narrate any policy.",
+  ].join("\n\n");
+}
