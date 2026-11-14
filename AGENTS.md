@@ -94,6 +94,29 @@ brokered connection entirely:
   authorized on GitHub yet. `ssh -v -T git@github.com` shows the fingerprint
   being offered.
 
+**Commit authorship must be the repo owner.** Vercel only deploys commits it can
+attribute to a GitHub account. Commits authored as `openhands
+<openhands@all-hands.dev>` are unlinked, so a deploy of such a commit is
+skipped. Commit as:
+
+```
+bluntedknives <256161244+bluntedknives@users.noreply.github.com>
+```
+
+`~/.gitconfig` is on the ephemeral overlay, so set this per checkout with
+`git config user.name/user.email` (persists on `/workspace`) and let
+`setup-ssh.sh` restore the global copy after a reset. To fix history that is
+already pushed, rewrite authorship over the unpushed range and force-push:
+
+```
+git filter-branch -f --env-filter 'export GIT_AUTHOR_NAME=...; ...' <base>..HEAD
+git push --force-with-lease origin <branch>
+```
+
+Verify with `git log --format="%h %an"` and confirm the GitHub API reports a
+linked author. The tree hash is unchanged by an authorship rewrite, so the code
+itself is untouched.
+
 **Never commit a credential.** `.env*` is gitignored and only `.env.example` is
 tracked; keep it that way. Before pushing, confirm with
 `git grep -nE "(nvapi-[A-Za-z0-9_-]{15,}|gh[pous]_[A-Za-z0-9]{20,}|github_pat_)"`
