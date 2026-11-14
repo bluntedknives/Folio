@@ -38,12 +38,19 @@
   --solid-fg: #ffffff;
 
   /* Curve palette: saturated enough to read on white. */
-  --g1: #0f9b8e;
-  --g2: #2563eb;
+  /* Desmos' curve colours, darkened slightly for the light canvas. */
+  --g1: #c74440;
+  --g2: #2d70b3;
   --g3: #dc2626;
-  --g4: #b45309;
-  --g5: #15803d;
-  --g6: #7c3aed;
+  --g4: #fa7e19;
+  --g5: #348543;
+  --g6: #6042a6;
+  --g7: #14181c;
+  /* Graph paper, grid and axes. */
+  --graph-paper: #ffffff;
+  --graph-grid: rgba(17, 24, 32, 0.14);
+  --graph-grid-minor: rgba(17, 24, 32, 0.055);
+  --graph-axis: rgba(17, 24, 32, 0.55);
 
   --radius-sm: 8px;
   --radius: 12px;
@@ -87,12 +94,19 @@
   --solid-fg: #14181c;
 
   /* Curve palette: brightened for the dark canvas. */
-  --g1: #2dd4bf;
-  --g2: #7aa2f7;
-  --g3: #f7768e;
-  --g4: #e0af68;
-  --g5: #9ece6a;
-  --g6: #bb9af7;
+  /* Desmos' curve colours, lifted for the dark canvas. */
+  --g1: #f7768e;
+  --g2: #6aa6f5;
+  --g3: #f87171;
+  --g4: #f0a35e;
+  --g5: #5fbf6f;
+  --g6: #a78bfa;
+  --g7: #e6e9ee;
+  /* Graph paper, grid and axes. */
+  --graph-paper: #14161a;
+  --graph-grid: rgba(255, 255, 255, 0.11);
+  --graph-grid-minor: rgba(255, 255, 255, 0.045);
+  --graph-axis: rgba(255, 255, 255, 0.5);
 
   color-scheme: dark;
 }
@@ -621,7 +635,7 @@ input {
   margin: 1em 0;
   border: 1px solid var(--stroke);
   border-radius: var(--radius);
-  background: var(--ink-050);
+  background: var(--graph-paper);
   overflow: hidden;
 }
 .graph-head {
@@ -665,8 +679,16 @@ input {
 }
 .graph-tick {
   font-family: var(--font-mono);
-  font-size: 9px;
-  fill: var(--ink-600);
+  font-size: 9.5px;
+  fill: var(--ink-500);
+  user-select: none;
+}
+.graph-axis-name {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-style: italic;
+  fill: var(--ink-500);
+  user-select: none;
 }
 .graph-label {
   font-family: var(--font-mono);
@@ -924,26 +946,6 @@ input {
   display: flex;
   align-items: center;
   gap: 0.25rem;
-}
-
-/* Desmos renders into its own canvas, so the wrapper only sets the box. */
-.graph-desmos {
-  position: relative;
-  background: var(--ink-100);
-}
-.graph-desmos-canvas {
-  width: 100%;
-  height: 400px;
-}
-.graph-desmos-note {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 0.8125rem;
-  color: var(--ink-500);
-  pointer-events: none;
 }
 
 /* ---------- study mode (screen share overlay) ---------- */
@@ -1245,6 +1247,20 @@ input {
   background: #06070a;
   border-bottom: 1px solid var(--stroke);
 }
+/* Expanded, the stage takes the width but not the height: a 16:9 box on a wide
+   screen is taller than the viewport, and letting it flex pushed the transport
+   and the answer below the fold, so the expanded player looked like a black
+   screen with a title on it. Bounding the stage by height keeps the answer
+   visible, and `contain` letterboxes the capture inside it. */
+.study-panel:fullscreen .study-stage,
+.study-floating .study-stage {
+  aspect-ratio: auto;
+  height: 46vh;
+  max-height: 46vh;
+}
+.study-panel:fullscreen .study-caption {
+  min-height: 6rem;
+}
 .study-stage video {
   position: absolute;
   inset: 0;
@@ -1351,6 +1367,30 @@ input {
   font-variant-numeric: tabular-nums;
   color: var(--ink-500);
   white-space: nowrap;
+}
+/* The one action in the transport: read what is on screen now. Filled, because
+   it is the reason the panel is open. */
+.study-answer-btn {
+  flex-shrink: 0;
+  border-radius: 999px;
+  background: var(--solid-bg);
+  padding: 0.3rem 0.85rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--solid-fg);
+  transition:
+    opacity 0.16s,
+    transform 0.12s var(--ease-out);
+}
+.study-answer-btn:hover:not(:disabled) {
+  opacity: 0.88;
+}
+.study-answer-btn:active:not(:disabled) {
+  transform: scale(0.97);
+}
+.study-answer-btn:disabled {
+  cursor: default;
+  opacity: 0.55;
 }
 .study-spacer {
   flex: 1;

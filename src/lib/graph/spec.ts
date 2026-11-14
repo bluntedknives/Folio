@@ -28,15 +28,17 @@ import {
 
 /**
  * Curve colours, resolved through CSS variables so the same spec stays legible
- * on the light and dark canvases. See --g1..--g6 in globals.css.
+ * on the light and dark canvases. See --g1..--g6 in globals.css. The order
+ * follows Desmos' own assignment (blue, green, purple, black, red, orange), so
+ * a curve keeps the colour a student would expect from the calculator.
  */
 export const PALETTE = [
-  "var(--g1)",
   "var(--g2)",
-  "var(--g3)",
-  "var(--g4)",
   "var(--g5)",
   "var(--g6)",
+  "var(--g7)",
+  "var(--g1)",
+  "var(--g4)",
 ];
 
 export interface PlotSpec {

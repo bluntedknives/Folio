@@ -50,14 +50,15 @@ npm run start -- -p 12000
   state such as the DOM.
 - Graph curve colours come from `PALETTE` in `src/lib/graph/spec.ts`, which
   resolves `var(--g1..--g6)` so the same spec renders on both canvases.
-- Graphs have two engines. `Graph.tsx` draws locally into SVG (default, no
-  network). The Desmos button lazily loads `src/components/graph/desmos.ts`,
-  which maps the same `GraphSpec` onto the Desmos API. Desmos paints its own
-  canvas, so it takes theme colours as constructor options
-  (`invertedColors`, `backgroundColor`) rather than reading CSS. If the 4 MB
-  script fails to load, the component silently falls back to the local plotter.
-  Set `NEXT_PUBLIC_DESMOS_API_KEY` for a production key; otherwise the public
-  trial key is used, which logs a prototyping warning.
+- Graphs are drawn locally into SVG by `Graph.tsx` — no script, no API key, no
+  network. The renderer imitates Desmos: minor and major gridlines, axes pinned
+  to the origin or the nearest edge, arrowheads, italic axis names, and Desmos'
+  own curve palette (`--g1..--g7`, reordered in `PALETTE`). Colours, paper and
+  grid all resolve through CSS variables (`--graph-paper`, `--graph-grid`,
+  `--graph-grid-minor`, `--graph-axis`) so both themes work from one code path.
+  The Desmos API was removed deliberately: it cannot be embedded without a key
+  (every script version 403s without one), so a "Desmos" button would have been
+  either broken or dependent on a trial key.
 - The `graph` fence tag is matched three ways in `Markdown.tsx`: as a normal
   language tag, nested inside another fence (`unwrapFence`), and on a line of
   its own (`detectTaglessSpec`). The last case needs the body to parse before
@@ -76,8 +77,9 @@ npm run start -- -p 12000
   in step, otherwise the floating window renders unstyled and light.
 - Study mode is built as a media player, because that is the mental model the
   user asked for. The live screen sits on a 16:9 stage as the video, the answer
-  plays out beneath it, revealed a character at a time, and the transport
-  mirrors a player: play/pause, next page, elapsed time, full screen. The stage
+  plays out beneath it, revealed a character at a time, and the transport has a
+  single Answer button, elapsed time and full screen. There is no pause: reading
+  is driven by the button, so the answer never advances on its own. The stage
   shows the same frame the model is given, so what is on screen is exactly what
   is read. Nothing is written to storage, so the transcript is gone when the
   panel closes.
@@ -85,18 +87,16 @@ npm run start -- -p 12000
   advancing. Resuming reads the screen immediately if it moved while paused,
   rather than waiting for the next sample, so unpausing captures whatever is on
   screen at that moment.
-- Study mode is automatic: sharing a screen is the only input. A still page is
-  the normal case, so the first settled page is read even though nothing
-  "changed"; comparing only against the previous frame means a worksheet that
-  never moves is never read at all, which is the bug this replaced. Reads are
-  compared against the last page that was *read*, so a page is read once and a
-  noisy screen is not read over and over. A frame that is a single flat colour
-  is skipped, so the blank screen at share time is not read.
-- The auto loop yields while an answer streams, so the answer's own repaint is
-  not read as a new page. A question the user types is the exception: it passes
-  `explicit`, runs during a stream, and never falls back to the default prompt.
-  Without that flag the ask box silently sent "Read this and solve the question
-  on screen." instead of what was typed.
+- Study mode reads on demand, not automatically: sharing a screen shows the
+  live picture, and the Answer button captures whatever is on screen and sends
+  it. The ask box is the same path with a typed question, and passes `explicit`
+  so it runs even while another answer streams and never falls back to the
+  default prompt. Without that flag the ask box silently sent "Read this and
+  solve the question on screen." instead of what was typed.
+- Expanded study mode bounds the stage by height (`46vh`), not just width. A
+  16:9 box sized by width is taller than a wide viewport, so the transport and
+  the answer were pushed below the fold and the expanded player looked like a
+  black screen with only the header showing.
 - Chat persistence has two rules that are easy to regress. A sent message is
   written immediately, not on the debounce: reloading within the first second
   after sending used to lose the question entirely. And hydrate must not

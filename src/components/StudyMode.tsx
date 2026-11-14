@@ -8,12 +8,9 @@ import { routeModel } from "@/lib/models";
 import {
   CaptureError,
   canCaptureScreen,
-  frameSignature,
   grabFrame,
-  isBlankSignature,
   pipApi,
   primeVideo,
-  signatureDistance,
   startScreenShare,
 } from "@/lib/capture";
 import { Markdown } from "./Markdown";
@@ -22,29 +19,11 @@ import {
   ChevronUpIcon,
   CollapseIcon,
   ExpandIcon,
-  NextIcon,
-  PauseIcon,
-  PlayIcon,
   PopOutIcon,
   ScreenIcon,
   XIcon,
 } from "./icons";
 
-/** How often the screen is sampled for changes. */
-const WATCH_INTERVAL_MS = 1500;
-/** Ticks to wait after a read, so the answer's own repaint is not read again. */
-const COOLDOWN_TICKS = 6;
-/**
- * How different two frames must be to count as a new page. A still worksheet
- * sits at 0; cursor movement and video playback stay under this; a page turn or
- * a scroll clears it. Frames are compared against the last page that was read,
- * not the previous frame, so a page that is simply noisy still reads once.
- */
-const CHANGE_THRESHOLD = 0.06;
-/** Identical samples in a row before a new page counts as settled. */
-const SETTLE_TICKS = 2;
-/** Upper bound on settling, so a looping animation cannot stall the reader. */
-const MAX_SETTLE_TICKS = 6;
 /** Characters of an answer revealed per second, so it plays like a video. */
 const REVEAL_CPS = 44;
 /** How often the reveal advances, in ms. */
@@ -74,8 +53,7 @@ function clock(total: number): string {
 /**
  * Study mode, built as a media player. Sharing a screen puts the live screen on
  * the stage as the video, and the answer plays out beneath it, revealed a
- * character at a time like playback. Pausing holds both: the reader stops
- * looking and the answer stops playing. Pressing play reads whatever is on
+ * character at a time like playback. The Answer button reads whatever is on
  * screen now, so the user controls when a page is read.
  *
  * The stage shows the same frame the model is given, so what is on screen is
@@ -87,7 +65,6 @@ export function StudyMode({ open, onClose }: { open: boolean; onClose: () => voi
   const [sharing, setSharing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [paused, setPaused] = useState(false);
   const [turns, setTurns] = useState<Turn[]>([]);
   const [revealed, setRevealed] = useState<Record<string, number>>({});
   const [elapsed, setElapsed] = useState(0);
@@ -102,13 +79,9 @@ export function StudyMode({ open, onClose }: { open: boolean; onClose: () => voi
   const panelRef = useRef<HTMLDivElement | null>(null);
   const captionRef = useRef<HTMLDivElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const cooldown = useRef(0);
   const busyRef = useRef(false);
-  const pausedRef = useRef(false);
   /** Signature of the page we last read, and the candidate next one. */
   const readSignature = useRef<string | null>(null);
-  const pendingSignature = useRef<string | null>(null);
-  const settleTicks = useRef(0);
   const inFlight = useRef<Set<AbortController>>(new Set());
   const idRef = useRef(0);
   const turnsRef = useRef<Turn[]>([]);
@@ -118,9 +91,6 @@ export function StudyMode({ open, onClose }: { open: boolean; onClose: () => voi
   useEffect(() => {
     busyRef.current = busy;
   }, [busy]);
-  useEffect(() => {
-    pausedRef.current = paused;
-  }, [paused]);
   useEffect(() => {
     turnsRef.current = turns;
   }, [turns]);
@@ -161,9 +131,8 @@ export function StudyMode({ open, onClose }: { open: boolean; onClose: () => voi
   }, []);
 
   /**
-   * Grabs a frame and asks about it. Used by the auto reader, the ask box and
-   * the skip control. `explicit` marks a deliberate read: it runs even while
-   * another answer streams, so a typed question is never dropped.
+   * Grabs a frame and asks about it. `explicit` marks a deliberate read: it runs
+   * even while another answer streams, so a typed question is never dropped.
    */
   const scan = useCallback(
     (question?: string, explicit = false) => {
@@ -175,8 +144,6 @@ export function StudyMode({ open, onClose }: { open: boolean; onClose: () => voi
       const attachment = grabFrame(video, "Screen");
       if (!attachment) return;
 
-      cooldown.current = COOLDOWN_TICKS;
-
       const id = `t${idRef.current++}`;
       const text = asked || DEFAULT_QUESTION;
       setTurns((prev) => [...prev, { id, question: text, answer: "" }].slice(-MAX_TURNS));
@@ -187,31 +154,12 @@ export function StudyMode({ open, onClose }: { open: boolean; onClose: () => voi
     [ask],
   );
 
-  /**
-   * Resumes play. If the screen has moved on while paused, it reads the new
-   * page right away instead of waiting for the next sample, so unpausing
-   * captures whatever is on screen at that moment.
-   */
-  const resume = useCallback(() => {
-    setPaused(false);
-    const video = videoRef.current;
-    if (!video) return;
-    const signature = frameSignature(video);
-    const read = readSignature.current;
-    if (signature && (!read || signatureDistance(signature, read) >= CHANGE_THRESHOLD)) {
-      scan(undefined, true);
-    }
-  }, [scan]);
-
   const stopShare = useCallback(() => {
     for (const controller of inFlight.current) controller.abort();
     inFlight.current.clear();
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
-    cooldown.current = 0;
     readSignature.current = null;
-    pendingSignature.current = null;
-    settleTicks.current = 0;
     setSharing(false);
     setBusy(false);
   }, []);
@@ -229,60 +177,17 @@ export function StudyMode({ open, onClose }: { open: boolean; onClose: () => voi
       await primeVideo(stream, video);
       stream.getVideoTracks()[0]?.addEventListener("ended", stopShare);
       readSignature.current = null;
-      pendingSignature.current = null;
-      settleTicks.current = 0;
-      cooldown.current = 0;
       setElapsed(0);
-      setPaused(false);
       setSharing(true);
     } catch (err) {
       setError(err instanceof CaptureError ? err.message : "Screen sharing could not start.");
     }
   }, [stopShare]);
 
-  // The auto reader. It samples the screen and asks the vision model about it
-  // by itself. A still page is the normal case, so the first settled page is
-  // read even though nothing "changed". Reads are compared against the last
-  // page that was read, so a page is read once rather than over and over.
-  useEffect(() => {
-    if (!open || !sharing || paused) return;
-    const timer = window.setInterval(() => {
-      const video = videoRef.current;
-      if (!video || busyRef.current || pausedRef.current) return;
-      const signature = frameSignature(video);
-      if (!signature || isBlankSignature(signature)) return;
-
-      const read = readSignature.current;
-      if (read && signatureDistance(signature, read) < CHANGE_THRESHOLD) {
-        pendingSignature.current = null;
-        settleTicks.current = 0;
-        return;
-      }
-      if (cooldown.current > 0) {
-        cooldown.current -= 1;
-        return;
-      }
-      const pending = pendingSignature.current;
-      if (!pending || signatureDistance(signature, pending) >= CHANGE_THRESHOLD) {
-        pendingSignature.current = signature;
-        settleTicks.current = 1;
-        return;
-      }
-      settleTicks.current += 1;
-      if (settleTicks.current < SETTLE_TICKS && settleTicks.current < MAX_SETTLE_TICKS) return;
-
-      readSignature.current = signature;
-      pendingSignature.current = null;
-      settleTicks.current = 0;
-      scan();
-    }, WATCH_INTERVAL_MS);
-    return () => window.clearInterval(timer);
-  }, [open, sharing, paused, scan]);
-
   // The reveal. Buffered text plays out at a readable speed, so the answer
-  // arrives like a video rather than snapping into place. Pausing stops it.
+  // arrives like a video rather than snapping into place.
   useEffect(() => {
-    if (!open || paused) return;
+    if (!open) return;
     const perTick = Math.max(1, Math.round((REVEAL_CPS * REVEAL_TICK_MS) / 1000));
     const timer = window.setInterval(() => {
       setRevealed((prev) => {
@@ -300,14 +205,14 @@ export function StudyMode({ open, onClose }: { open: boolean; onClose: () => voi
       });
     }, REVEAL_TICK_MS);
     return () => window.clearInterval(timer);
-  }, [open, paused]);
+  }, [open]);
 
-  // Elapsed time, held while paused, exactly like a player.
+  // Elapsed time, counting up while a screen is shared.
   useEffect(() => {
-    if (!open || !sharing || paused) return;
+    if (!open || !sharing) return;
     const timer = window.setInterval(() => setElapsed((e) => e + 1), 1000);
     return () => window.clearInterval(timer);
-  }, [open, sharing, paused]);
+  }, [open, sharing]);
 
   // Follow the reveal, unless the user has scrolled up to read something.
   useEffect(() => {
@@ -383,7 +288,7 @@ export function StudyMode({ open, onClose }: { open: boolean; onClose: () => voi
       <div className="study-head">
         <ScreenIcon className="h-4 w-4 text-ink-700" />
         <span className="text-[0.875rem] font-medium text-ink-900">Study</span>
-        {sharing && <span className="study-status">{paused ? "Paused" : "Live"}</span>}
+        {sharing && <span className="study-status">Live</span>}
         <div className="ml-auto flex items-center gap-1">
           {!pipWindow && (
             <button
@@ -446,21 +351,10 @@ export function StudyMode({ open, onClose }: { open: boolean; onClose: () => voi
                 </button>
               </div>
             )}
-            {sharing && paused && (
-              <button
-                type="button"
-                onClick={resume}
-                aria-label="Play"
-                title="Play"
-                className="study-bigplay"
-              >
-                <PlayIcon className="h-5 w-5" />
-              </button>
-            )}
             {sharing && (
-              <span className={`study-veil ${paused ? "study-veil-paused" : ""}`}>
+              <span className="study-veil">
                 <span className="study-veil-dot" />
-                {paused ? "Paused" : busy ? "Reading" : playing ? "Answering" : "Watching"}
+                {busy ? "Reading" : playing ? "Answering" : "Watching"}
               </span>
             )}
             {sharing && error && (
@@ -476,25 +370,12 @@ export function StudyMode({ open, onClose }: { open: boolean; onClose: () => voi
               <div className="study-transport">
                 <button
                   type="button"
-                  onClick={() => (paused ? resume() : setPaused(true))}
-                  aria-label={paused ? "Play" : "Pause"}
-                  title={paused ? "Play" : "Pause"}
-                  className="icon-button h-7 w-7"
-                >
-                  {paused ? (
-                    <PlayIcon className="h-3.5 w-3.5" />
-                  ) : (
-                    <PauseIcon className="h-3.5 w-3.5" />
-                  )}
-                </button>
-                <button
-                  type="button"
                   onClick={() => scan(undefined, true)}
-                  aria-label="Next page"
-                  title="Read the screen again"
-                  className="icon-button h-7 w-7"
+                  disabled={busy}
+                  className="study-answer-btn"
+                  title="Answer the page on screen"
                 >
-                  <NextIcon className="h-3.5 w-3.5" />
+                  {busy ? "Reading\u2026" : "Answer"}
                 </button>
                 <span className="study-time">{clock(elapsed)}</span>
                 <span className="study-spacer" />
@@ -515,7 +396,7 @@ export function StudyMode({ open, onClose }: { open: boolean; onClose: () => voi
                 )}
               </div>
               <div className="study-progress">
-                {!paused && <div className="study-progress-fill" />}
+                <div className="study-progress-fill" />
               </div>
             </>
           )}
@@ -537,7 +418,7 @@ export function StudyMode({ open, onClose }: { open: boolean; onClose: () => voi
                 ) : shown ? (
                   <div className="study-answer study-block">
                     <Markdown>{shown}</Markdown>
-                    {playing && !paused && <span className="study-caret" />}
+                    {playing && <span className="study-caret" />}
                   </div>
                 ) : (
                   <p className="study-thinking">

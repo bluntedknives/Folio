@@ -1,16 +1,7 @@
 "use client";
 
-import {
-  useCallback,
-  useEffect,
-  useId,
-  useMemo,
-  useRef,
-  useState,
-  useSyncExternalStore,
-} from "react";
+import { useCallback, useId, useMemo, useRef, useState } from "react";
 import { parseGraphSpec, type GraphSpec, type ParamSpec, type PlotSpec } from "@/lib/graph/spec";
-import { mountDesmos, type DesmosHandle } from "./desmos";
 
 const WIDTH = 640;
 const HEIGHT = 400;
@@ -51,10 +42,6 @@ export function Graph({ source }: { source: string }) {
 
 export function GraphCanvas({ spec }: { spec: GraphSpec }) {
   const [hoverX, setHoverX] = useState<number | null>(null);
-  // Desmos is the default engine, so a graph gets dragging, tracing and tables
-  // out of the box. The built-in plotter stays one click away and takes over
-  // automatically if the Desmos script cannot load.
-  const [engine, setEngine] = useState<"local" | "desmos">("desmos");
   const svgRef = useRef<SVGSVGElement>(null);
   const drag = useRef<{ x: number; y: number; bounds: Bounds } | null>(null);
   // Each instance needs its own clip path id: two graphs on one page would
@@ -174,31 +161,13 @@ export function GraphCanvas({ spec }: { spec: GraphSpec }) {
       <div className="graph-head">
         <span className="graph-lang">{spec.title ?? "graph"}</span>
         <div className="graph-head-actions">
-          <button
-            type="button"
-            onClick={() => setEngine(engine === "desmos" ? "local" : "desmos")}
-            className="graph-reset"
-            title={
-              engine === "desmos"
-                ? "Switch to the built-in plotter"
-                : "Open in Desmos for dragging, tracing and tables"
-            }
-          >
-            {engine === "desmos" ? "Built-in" : "Desmos"}
+          <button type="button" onClick={() => setBounds(baseBounds)} className="graph-reset">
+            Reset view
           </button>
-          {engine === "local" && (
-            <button type="button" onClick={() => setBounds(baseBounds)} className="graph-reset">
-              Reset view
-            </button>
-          )}
         </div>
       </div>
 
-      {engine === "desmos" ? (
-        <DesmosView spec={spec} onFail={() => setEngine("local")} />
-      ) : (
-        <>
-      <svg
+            <svg
         ref={svgRef}
         viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
         className="graph-svg"
@@ -217,28 +186,47 @@ export function GraphCanvas({ spec }: { spec: GraphSpec }) {
           </clipPath>
         </defs>
 
-        <g clipPath={`url(#${clipId})`}>
-          <rect
-            x={PLOT.x0}
-            y={PLOT.y0}
-            width={PLOT.x1 - PLOT.x0}
-            height={PLOT.y1 - PLOT.y0}
-            fill="var(--ink-100)"
-          />
+        <rect
+          x={PLOT.x0}
+          y={PLOT.y0}
+          width={PLOT.x1 - PLOT.x0}
+          height={PLOT.y1 - PLOT.y0}
+          fill="var(--graph-paper)"
+        />
 
+        {/* Minor gridlines first, then the major ones over them, so the eye
+            reads the labelled lines as the structure. */}
+        <g clipPath={`url(#${clipId})`}>
+          {minorTicks(view.xMin, view.xMax, xTicks).map((t) => (
+            <line key={`mx${t}`} x1={toX(t)} x2={toX(t)} y1={PLOT.y0} y2={PLOT.y1} stroke="var(--graph-grid-minor)" />
+          ))}
+          {minorTicks(view.yMin, view.yMax, yTicks).map((t) => (
+            <line key={`my${t}`} x1={PLOT.x0} x2={PLOT.x1} y1={toY(t)} y2={toY(t)} stroke="var(--graph-grid-minor)" />
+          ))}
           {xTicks.map((t) => (
-            <line key={`gx${t}`} x1={toX(t)} x2={toX(t)} y1={PLOT.y0} y2={PLOT.y1} stroke="var(--stroke-faint)" />
+            <line key={`gx${t}`} x1={toX(t)} x2={toX(t)} y1={PLOT.y0} y2={PLOT.y1} stroke="var(--graph-grid)" />
           ))}
           {yTicks.map((t) => (
-            <line key={`gy${t}`} x1={PLOT.x0} x2={PLOT.x1} y1={toY(t)} y2={toY(t)} stroke="var(--stroke-faint)" />
+            <line key={`gy${t}`} x1={PLOT.x0} x2={PLOT.x1} y1={toY(t)} y2={toY(t)} stroke="var(--graph-grid)" />
           ))}
 
-          {view.yMin <= 0 && view.yMax >= 0 && (
-            <line x1={PLOT.x0} x2={PLOT.x1} y1={toY(0)} y2={toY(0)} stroke="var(--stroke-strong)" />
-          )}
-          {view.xMin <= 0 && view.xMax >= 0 && (
-            <line x1={toX(0)} x2={toX(0)} y1={PLOT.y0} y2={PLOT.y1} stroke="var(--stroke-strong)" />
-          )}
+          {/* The axes are pinned to the edges when the origin is off-screen, so
+              the numbers always have a line to sit against, as Desmos does. */}
+          {axisLines(view).map((axis) => (
+            <g key={axis.key}>
+              <line
+                x1={axis.x1}
+                y1={axis.y1}
+                x2={axis.x2}
+                y2={axis.y2}
+                stroke="var(--graph-axis)"
+                strokeWidth={1.4}
+              />
+              {axis.arrow && (
+                <path d={axis.arrow} fill="var(--graph-axis)" />
+              )}
+            </g>
+          ))}
 
           {spec.lines.map((line, i) =>
             line.axis === "v" ? (
@@ -254,7 +242,7 @@ export function GraphCanvas({ spec }: { spec: GraphSpec }) {
               d={d}
               fill="none"
               stroke={plot.color}
-              strokeWidth={2}
+              strokeWidth={2.1}
               strokeLinecap="round"
               strokeLinejoin="round"
               strokeDasharray={plot.dashed ? "6 4" : undefined}
@@ -277,10 +265,10 @@ export function GraphCanvas({ spec }: { spec: GraphSpec }) {
                   key={j}
                   cx={toX(p.x)}
                   cy={toY(p.y)}
-                  r={3.2}
+                  r={3.4}
                   fill={table.color}
-                  stroke="var(--ink-050)"
-                  strokeWidth={1.2}
+                  stroke="var(--graph-paper)"
+                  strokeWidth={1.4}
                 />
               ))}
             </g>
@@ -288,7 +276,7 @@ export function GraphCanvas({ spec }: { spec: GraphSpec }) {
 
           {spec.points.map((point, i) => (
             <g key={`pt${i}`}>
-              <circle cx={toX(point.x)} cy={toY(point.y)} r={4} fill={point.color} stroke="var(--ink-050)" strokeWidth={1.5} />
+              <circle cx={toX(point.x)} cy={toY(point.y)} r={4.2} fill={point.color} stroke="var(--graph-paper)" strokeWidth={1.6} />
               {point.label && (
                 <text x={toX(point.x) + 8} y={toY(point.y) - 7} className="graph-label" fill={point.color}>
                   {point.label}
@@ -298,29 +286,34 @@ export function GraphCanvas({ spec }: { spec: GraphSpec }) {
           ))}
 
           {hoverX !== null && (
-            <line x1={toX(hoverX)} x2={toX(hoverX)} y1={PLOT.y0} y2={PLOT.y1} stroke="var(--stroke-strong)" strokeDasharray="3 3" />
+            <line x1={toX(hoverX)} x2={toX(hoverX)} y1={PLOT.y0} y2={PLOT.y1} stroke="var(--graph-axis)" strokeDasharray="3 3" />
           )}
           {hoverX !== null &&
             hoverReadout?.map(({ plot, y }, i) => (
-              <circle key={`hp${i}`} cx={toX(hoverX)} cy={toY(y)} r={3.4} fill={plot.color} stroke="var(--ink-050)" strokeWidth={1.2} />
+              <circle key={`hp${i}`} cx={toX(hoverX)} cy={toY(y)} r={3.4} fill={plot.color} stroke="var(--graph-paper)" strokeWidth={1.2} />
             ))}
         </g>
 
+        {/* Tick numbers sit in the gutter, so they never collide with a curve. */}
         {xTicks.map((t) => (
-          <text key={`tx${t}`} x={toX(t)} y={HEIGHT - 9} className="graph-tick" textAnchor="middle">
+          <text key={`tx${t}`} x={toX(t)} y={HEIGHT - 8} className="graph-tick" textAnchor="middle">
             {formatTick(t)}
           </text>
         ))}
         {yTicks.map((t) => (
-          <text key={`ty${t}`} x={PLOT.x0 - 6} y={toY(t) + 3.5} className="graph-tick" textAnchor="end">
+          <text key={`ty${t}`} x={PLOT.x0 - 7} y={toY(t) + 3.5} className="graph-tick" textAnchor="end">
             {formatTick(t)}
           </text>
         ))}
+        <text x={PLOT.x1 + 1} y={toY(0) + 13} className="graph-axis-name" textAnchor="end">
+          x
+        </text>
+        <text x={PLOT.x0 - 8} y={PLOT.y0 + 11} className="graph-axis-name" textAnchor="end">
+          y
+        </text>
       </svg>
-        </>
-      )}
 
-      {engine === "local" && sliders.length > 0 && (
+      {sliders.length > 0 && (
         <div className="graph-sliders">
           {sliders.map((param) => (
             <Slider
@@ -336,7 +329,7 @@ export function GraphCanvas({ spec }: { spec: GraphSpec }) {
         </div>
       )}
 
-      {engine === "local" && (hasLegend || hoverReadout) && (
+      {(hasLegend || hoverReadout) && (
         <div className="graph-foot">
           {hoverReadout && hoverReadout.length > 0 ? (
             hoverReadout.map(({ plot, y }, i) => (
@@ -492,21 +485,88 @@ function round(value: number): number {
   return Math.round(value * 100) / 100;
 }
 
-/** ~7 ticks across the range, snapped to 1/2/5 x 10^n. */
-function ticks(min: number, max: number): number[] {
-  const span = max - min;
-  if (!Number.isFinite(span) || span <= 0) return [];
-  const rough = span / 7;
+/** The 1/2/5 x 10^n step that best fits `span` into about `count` divisions. */
+function niceStep(span: number, count: number): number {
+  const rough = span / count;
   const magnitude = Math.pow(10, Math.floor(Math.log10(rough)));
   const normalised = rough / magnitude;
-  const step = (normalised >= 5 ? 5 : normalised >= 2 ? 2 : 1) * magnitude;
+  const factor = normalised >= 5 ? 5 : normalised >= 2 ? 2 : 1;
+  return factor * magnitude;
+}
 
+/** Ticks for a range, snapped to 1/2/5 x 10^n. */
+function ticksWith(min: number, max: number, step: number): number[] {
+  if (!Number.isFinite(step) || step <= 0) return [];
   const out: number[] = [];
   const start = Math.ceil(min / step) * step;
-  for (let t = start; t <= max + step * 1e-6 && out.length < 40; t += step) {
+  for (let t = start; t <= max + step * 1e-6 && out.length < 400; t += step) {
     out.push(Math.abs(t) < step * 1e-6 ? 0 : t);
   }
   return out;
+}
+
+/** Labelled ticks, about seven across the range. */
+function ticks(min: number, max: number): number[] {
+  const span = max - min;
+  if (!Number.isFinite(span) || span <= 0) return [];
+  return ticksWith(min, max, niceStep(span, 7));
+}
+
+/**
+ * Unlabelled gridlines halfway between the labelled ones, which is what gives
+ * a Desmos grid its texture. Skipped when the labels are already dense.
+ */
+function minorTicks(min: number, max: number, majors: number[]): number[] {
+  if (majors.length < 2 || majors.length > 14) return [];
+  const step = (majors[1] - majors[0]) / 2;
+  return ticksWith(min, max, step).filter((t) => !majors.includes(t));
+}
+
+interface Axis {
+  key: string;
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  /** Arrowhead path at the positive end, or null when the axis is clipped. */
+  arrow: string | null;
+}
+
+/**
+ * The x and y axes. When the origin is inside the view the axis is drawn there;
+ * otherwise it is pinned to the nearest edge so the tick numbers still have a
+ * line to sit against, which is what Desmos does.
+ */
+function axisLines(view: Bounds): Axis[] {
+  const xAt = view.yMin <= 0 && view.yMax >= 0 ? toYIn(view, 0) : PLOT.y0;
+  const yAt = view.xMin <= 0 && view.xMax >= 0 ? toXIn(view, 0) : PLOT.x0;
+  const size = 4;
+  return [
+    {
+      key: "x-axis",
+      x1: PLOT.x0,
+      y1: xAt,
+      x2: PLOT.x1,
+      y2: xAt,
+      arrow: `M ${PLOT.x1} ${xAt} l ${-size * 1.8} ${-size} l 0 ${size * 2} z`,
+    },
+    {
+      key: "y-axis",
+      x1: yAt,
+      y1: PLOT.y1,
+      x2: yAt,
+      y2: PLOT.y0,
+      arrow: `M ${yAt} ${PLOT.y0} l ${-size} ${size * 1.8} l ${size * 2} 0 z`,
+    },
+  ];
+}
+
+function toXIn(view: Bounds, x: number): number {
+  return PLOT.x0 + ((x - view.xMin) / (view.xMax - view.xMin)) * (PLOT.x1 - PLOT.x0);
+}
+
+function toYIn(view: Bounds, y: number): number {
+  return PLOT.y1 - ((y - view.yMin) / (view.yMax - view.yMin)) * (PLOT.y1 - PLOT.y0);
 }
 
 function formatTick(value: number): string {
@@ -524,77 +584,4 @@ function zoom(view: Bounds, factor: number, cx: number, cy: number): Bounds {
     yMin: cy + (view.yMin - cy) * factor,
     yMax: cy + (view.yMax - cy) * factor,
   };
-}
-
-/**
- * The Desmos calculator, mounted on demand. The library draws into its own
- * canvas inside `containerRef`, so React never re-renders the graph itself.
- * If the script fails to load we hand control back to the built-in plotter.
- */
-function DesmosView({ spec, onFail }: { spec: GraphSpec; onFail: () => void }) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [status, setStatus] = useState<"loading" | "ready" | "failed">("loading");
-  const handleRef = useRef<DesmosHandle | null>(null);
-  const dark = useIsDark();
-
-  useEffect(() => {
-    let cancelled = false;
-    const element = containerRef.current;
-    if (!element) return;
-
-    setStatus("loading");
-    mountDesmos(element, spec, { dark })
-      .then((handle) => {
-        if (cancelled) {
-          handle.dispose();
-          return;
-        }
-        handleRef.current = handle;
-        setStatus("ready");
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setStatus("failed");
-          onFail();
-        }
-      });
-
-    return () => {
-      cancelled = true;
-      handleRef.current?.dispose();
-      handleRef.current = null;
-    };
-    // Re-mounting on every spec change would reload the 4 MB script; the spec
-    // for a given message never changes after it finishes streaming.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // Theme changes are pushed into the existing calculator rather than remounted.
-  useEffect(() => {
-    if (status === "ready") handleRef.current?.setDark(dark);
-  }, [dark, status]);
-
-  return (
-    <div className="graph-desmos">
-      <div ref={containerRef} className="graph-desmos-canvas" />
-      {status === "loading" && <span className="graph-desmos-note">Loading Desmos…</span>}
-    </div>
-  );
-}
-
-/** Tracks the `dark` class on <html> without mirroring it in state. */
-function useIsDark(): boolean {
-  const subscribe = useCallback((onChange: () => void) => {
-    const observer = new MutationObserver(onChange);
-    observer.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ["class"],
-    });
-    return () => observer.disconnect();
-  }, []);
-  return useSyncExternalStore(
-    subscribe,
-    () => document.documentElement.classList.contains("dark"),
-    () => false,
-  );
 }
