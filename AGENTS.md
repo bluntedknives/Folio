@@ -38,8 +38,49 @@ npm run start -- -p 12000
   through `useSyncExternalStore` rather than mirroring it in state.
 - The key never reaches the browser: `NVIDIA_API_KEY` has no `NEXT_PUBLIC_`
   prefix. `.env*` is gitignored; only `.env.example` (placeholder) is tracked.
-- Model choice is automatic (`routeModel` in `src/lib/models.ts`). The API
+- Model choice is automatic (`routeFor` in `src/lib/models.ts`). The API
   route rejects any model outside the allow-list.
+
+## Credentials
+
+Two separate credentials, stored in two different places. Do not mix them up.
+
+- **`NVIDIA_API_KEY`** — powers the app. Lives in `.env.local` (gitignored),
+  read server-side only. This is what makes chat, vision and YouTube work.
+  Get one at <https://build.nvidia.com>. `.env.example` holds the placeholder
+  shape; never put a real key there or in any other tracked file.
+- **GitHub access** — for pushing this repo. It is *not* a `GITHUB_TOKEN`
+  environment variable. OpenHands brokers it: the account token sits in
+  `~/.openhands/git-credentials/github.token`, and git calls
+  `~/.openhands/git-credential-helper`, which exchanges it for a
+  short-lived installation token via
+  `https://app.all-hands.dev/api/v1/webhooks/secrets`. Git config wires this up
+  as `credential.https://github.com.helper`, so a plain `git push` just works
+  once access is granted. Exporting `GITHUB_TOKEN` does not affect `git push`;
+  only `gh` reads that.
+
+**Persisting a credential across sessions.** Environment variables set in a
+shell do not survive into the next conversation. To make one available every
+time, save it as a workspace secret in the OpenHands UI — `Settings > Secrets >
+Add a new secret`, name it exactly as the variable should appear (e.g.
+`NVIDIA_API_KEY`), and it is exported into the shell for conversations started
+after the save. The same panel is where an expired key gets replaced. Secrets
+are matched by name anywhere in a bash command and their values are masked in
+output, so reference them as `$NVIDIA_API_KEY` rather than pasting the literal.
+Note this does not help the brokered GitHub credential above, which is
+authorized through the GitHub connection rather than a secret.
+
+**If a push is denied with `403 ... Permission to <owner>/<repo>.git denied`.**
+Read access working while write fails means the GitHub connection was authorized
+without write permission. `git ls-remote` succeeding is the tell. Fix it in the
+GitHub integration settings by granting write access (Contents: read and write)
+to this repository, then re-run the push. A `403` on push is a permission
+problem, not a bad or expired credential.
+
+**Never commit a credential.** `.env*` is gitignored and only `.env.example` is
+tracked; keep it that way. Before pushing, confirm with
+`git grep -nE "(nvapi-[A-Za-z0-9_-]{15,}|gh[pous]_[A-Za-z0-9]{20,}|github_pat_)"`
+that nothing leaked into a tracked file.
 
 ## Gotchas
 
