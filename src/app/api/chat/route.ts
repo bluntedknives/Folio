@@ -1,7 +1,9 @@
 import { readChatRequest } from "@/lib/validation";
-import { SYSTEM_PROMPT } from "@/lib/models";
+import { SYSTEM_PROMPT, getModel, routeFor, thinkingFor } from "@/lib/models";
 import { formatSources, search, shouldSearch } from "@/lib/search";
-import type { Source, WireMessage } from "@/lib/types";
+import { formatVideo, loadVideo } from "@/lib/youtube-server";
+import { latestVideoId } from "@/lib/youtube";
+import type { Source, WireMessage, WirePart } from "@/lib/types";
 
 export const maxDuration = 120;
 
@@ -19,15 +21,40 @@ export async function POST(request: Request) {
     );
   }
 
+  // A video in the conversation is re-read here rather than stored with the
+  // chat, so the prompt always carries the current title and description.
+  const videoId = parsed.body.videoId ?? latestVideoId(parsed.body.messages);
+  const video = videoId ? await loadVideo(videoId) : null;
+
   // Search runs on the server, before the model call, so the results can be
   // folded into the system prompt. A failure here just means no web context.
+  // A video question is answered from the video, so search is skipped: the
+  // question is usually "what is this" and the open web has nothing to add.
   let sources: Source[] = [];
-  if (parsed.body.query && shouldSearch(parsed.body.query)) {
+  if (!video && parsed.body.query && shouldSearch(parsed.body.query)) {
     sources = await search(parsed.body.query);
   }
-  const systemPrompt = sources.length
-    ? `${SYSTEM_PROMPT}\n\n${formatSources(sources)}`
-    : SYSTEM_PROMPT;
+
+  const extras = [sources.length ? formatSources(sources) : "", video ? formatVideo(video) : ""]
+    .filter(Boolean)
+    .join("\n\n");
+  const systemPrompt = extras ? `${SYSTEM_PROMPT}\n\n${extras}` : SYSTEM_PROMPT;
+
+  // Frames are attached to the newest turn, which is what the model is being
+  // asked about. Older turns keep only their text.
+  const messages = toUpstream(parsed.body.messages, video?.frames ?? []);
+
+  // A video carries images, and only the multimodal model can see them. The
+  // route was chosen from the text alone, so it is corrected here rather than
+  // sending an image part to a model that will reject the whole request.
+  const decision = routeFor({
+    hasImages: parsed.body.hasImages || (video?.frames.length ?? 0) > 0,
+    hasAudio: parsed.body.hasAudio,
+    prompt: parsed.body.query,
+  });
+  const routed = getModel(parsed.body.model);
+  const canSee = (routed?.vision ?? false) || (video?.frames.length ?? 0) === 0;
+  const model = canSee ? parsed.body.model : decision.model;
 
   const baseUrl = (process.env.NVIDIA_BASE_URL ?? "https://integrate.api.nvidia.com/v1").replace(
     /\/+$/,
@@ -42,14 +69,17 @@ export async function POST(request: Request) {
       Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      model: parsed.body.model,
-      messages: [{ role: "system", content: systemPrompt }, ...toUpstream(parsed.body.messages)],
+      model,
+      messages: [{ role: "system", content: systemPrompt }, ...messages],
       stream: true,
       temperature: 0.6,
       top_p: 0.95,
       // Reasoning models spend most of the budget on chain-of-thought before
       // the answer starts, so the ceiling has to cover both.
       max_tokens: 16384,
+      // Off for everything but the deep route: it is the single biggest saving
+      // in time-to-first-token, and short homework does not need it.
+      chat_template_kwargs: { enable_thinking: thinkingFor(model) },
     }),
     signal: AbortSignal.any([request.signal, AbortSignal.timeout(UPSTREAM_TIMEOUT_MS)]),
   });
@@ -73,11 +103,28 @@ export async function POST(request: Request) {
 /**
  * Expands our wire format into the OpenAI-style content parts NVIDIA expects.
  * A message with parts becomes an array; one without stays a plain string.
+ *
+ * `frames` are appended to the last user turn only: they are what the question
+ * is about, and repeating them on every turn would multiply the prompt size
+ * for no gain.
  */
-function toUpstream(messages: WireMessage[]) {
-  return messages.map((m) => {
-    if (!m.parts?.length) return { role: m.role, content: m.content };
-    const parts = [...m.parts];
+function toUpstream(messages: WireMessage[], frames: string[]) {
+  let lastUser = -1;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role === "user") {
+      lastUser = i;
+      break;
+    }
+  }
+
+  return messages.map((m, i) => {
+    const parts: WirePart[] = [...(m.parts ?? [])];
+    if (frames.length && i === lastUser) {
+      for (const url of frames) parts.push({ type: "image_url", image_url: { url } });
+    }
+
+    if (!parts.length) return { role: m.role, content: m.content };
+
     // The user's own words always ride along, even when the attachment notes
     // added their own text part. Dropping them here left the model looking at
     // an image with no question.

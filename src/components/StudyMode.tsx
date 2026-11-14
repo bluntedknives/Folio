@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { Attachment, ChatMessage } from "@/lib/types";
 import { ChatError, streamChat } from "@/lib/api";
-import { routeModel } from "@/lib/models";
+import { routeFor } from "@/lib/models";
 import {
   CaptureError,
   canCaptureScreen,
@@ -101,7 +101,7 @@ export function StudyMode({ open, onClose }: { open: boolean; onClose: () => voi
     inFlight.current.add(controller);
     setBusy(true);
     try {
-      const model = routeModel({ hasImages: true, hasAudio: false, prompt: question });
+      const { model } = routeFor({ hasImages: true, hasAudio: false, prompt: question });
       const history: ChatMessage[] = [
         { id, role: "user", content: question, attachments: [attachment], createdAt: Date.now() },
       ];

@@ -13,6 +13,12 @@ export interface ChatRequestBody {
   messages: WireMessage[];
   /** The user's own words for this turn, used to decide on a web search. */
   query: string;
+  /** The video the newest turn is about, when one was linked. */
+  videoId?: string;
+  /** True when the newest turn carries an image. */
+  hasImages: boolean;
+  /** True when the newest turn carries audio. */
+  hasAudio: boolean;
 }
 
 export type ParseResult =
@@ -75,7 +81,17 @@ export async function readChatRequest(request: Request): Promise<ParseResult> {
   if (messages.length === 0) return { ok: false, response: fail(400, "No messages were sent.") };
 
   const query = typeof body.query === "string" ? body.query.slice(0, 2000) : "";
-  return { ok: true, body: { model: model.id, messages, query } };
+  // The video id is validated here as well as on the server, so a malformed id
+  // never reaches the fetch. Anything that is not a plain 11-character id is
+  // dropped rather than rejected: the question is still answerable without it.
+  const rawVideoId = typeof body.videoId === "string" ? body.videoId.trim() : "";
+  const videoId = /^[A-Za-z0-9_-]{11}$/.test(rawVideoId) ? rawVideoId : undefined;
+
+  const latest = messages[messages.length - 1];
+  const hasImages = (latest?.parts ?? []).some((p) => p.type === "image_url");
+  const hasAudio = (latest?.parts ?? []).some((p) => p.type === "input_audio");
+
+  return { ok: true, body: { model: model.id, messages, query, videoId, hasImages, hasAudio } };
 }
 
 type PartsResult = { ok: true; value: WirePart[] } | { ok: false; response: NextResponse };

@@ -1,4 +1,5 @@
 import type { Attachment, ChatMessage, Source, WireMessage, WirePart } from "./types";
+import { latestVideoId } from "./youtube";
 
 export interface StreamHandlers {
   onReasoning: (delta: string) => void;
@@ -22,10 +23,20 @@ export async function streamChat(
   signal: AbortSignal,
   handlers: StreamHandlers,
 ): Promise<void> {
+  // The video the newest turn is about, if any. Sent as an id rather than as
+  // metadata: the server re-reads the video, so nothing about it is stored and
+  // a title can never go stale.
+  const videoId = latestVideoId(history.map((m) => ({ role: m.role, content: m.content })));
+
   const response = await fetch("/api/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ model, messages: toWire(history), query }),
+    body: JSON.stringify({
+      model,
+      messages: toWire(history),
+      query,
+      videoId: videoId ?? undefined,
+    }),
     signal,
   });
 

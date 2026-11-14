@@ -44,6 +44,26 @@ export interface Source {
   snippet: string;
 }
 
+/**
+ * What could be read about a YouTube video. There is deliberately no
+ * transcript: the captions endpoint refuses datacenter IPs, so claiming one
+ * would be a lie. `frames` are stills the model actually looked at, and the
+ * answer has to say that the audio was not heard.
+ */
+export interface VideoContext {
+  id: string;
+  url: string;
+  title: string;
+  channel: string;
+  /** "51:22" as YouTube displays it, or "" when the page did not expose it. */
+  duration: string;
+  /** Human date, e.g. "Dec 27, 2020". */
+  published: string;
+  description: string;
+  /** Data URLs of the stills sent to the model. */
+  frames: string[];
+}
+
 export interface Conversation {
   id: string;
   title: string;

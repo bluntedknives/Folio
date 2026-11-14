@@ -125,3 +125,36 @@ npm run start -- -p 12000
   encoded string in directly fails with a DataError, since a string has no `id`
   property. Legacy localStorage records are always swept on hydrate and moved
   across, and a record already in IndexedDB wins so a re-run cannot clobber it.
+- **Reasoning is off unless the model is the deep one.** `thinkingFor` in
+  `src/lib/models.ts` decides from the model's `tier`, and the API route passes
+  it as `chat_template_kwargs.enable_thinking`. Leaving it on for every call is
+  the main cause of "it takes too long to think": on this account it took a
+  conceptual question from 1.2s to 5.3s and a calculus problem from 2.1s to
+  7.0s, for the same answer. The decision hangs off the model, not the route, so
+  the vision override in the route keeps the right setting too.
+- **YouTube is described, not watched.** `src/lib/youtube-server.ts` reads what
+  answers a plain request: oEmbed for the title and channel, the watch page's
+  `ytInitialData` for description/duration/publish date, and four distinct
+  stills (`maxresdefault`, `hq1..hq3`). The transcript is not available: every
+  caption route (`timedtext`, InnerTube `get_transcript`, the player's
+  `captionTracks`) is refused for a datacenter IP, and the public mirrors are
+  blocked or need a token. So the model is told plainly that it has no audio and
+  no transcript, and the prompt requires it to say so rather than invent spoken
+  content. Do not add a "transcript" field without verifying one is reachable —
+  a fabricated transcript is worse than an honest "I can only see the frames".
+- `ytInitialData` must be extracted with the brace matcher in
+  `youtube-server.ts`, not a regex. The blob has nested objects and escaped
+  quotes, so a regex grabs a truncated prefix and `JSON.parse` throws.
+- The video id is the only thing that travels with a conversation. The client
+  sends it (from the newest user turn, `latestVideoId`), and the server re-reads
+  the video per turn, so no metadata is stored and a title cannot go stale. A
+  follow-up that does not repeat the link still finds the video. Frames are
+  attached to the last user turn only.
+- A video carries images, so the route must be corrected to the vision model
+  when the text-based choice cannot see. The check is
+  `getModel(...)?.vision` in `src/app/api/chat/route.ts`; without it the image
+  parts go to a text-only model and the whole request is rejected.
+- The system prompt's length contract is load-bearing. "Be shorter than you
+  think you should" did not stop a one-line question getting an essay; naming
+  the bands (one-liner, normal, explicit essay) and adding a final
+  delete-anything-that-is-not-the-answer pass did. Keep the concrete examples.

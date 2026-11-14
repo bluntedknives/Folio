@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { Attachment } from "@/lib/types";
 import { AudioIcon, DocumentIcon, ImageIcon, PlotIcon, SendIcon, StopIcon, XIcon } from "./icons";
+import { findVideoUrl } from "@/lib/youtube";
 import {
   AttachmentRejected,
   MAX_ATTACHMENTS,
@@ -79,12 +80,32 @@ export function Composer({
   }
 
   const canSend = !disabled && (text.trim().length > 0 || attachments.length > 0);
+  // A pasted YouTube link is announced before sending, so it is clear the video
+  // will be read rather than just treated as text.
+  const video = findVideoUrl(text);
 
   return (
     <div className="px-3 pt-1 pb-4 sm:px-6">
       <div className="mx-auto max-w-3xl">
         {notice && (
           <p className="rise mb-2 flex items-center gap-1.5 text-[0.75rem] text-danger">{notice}</p>
+        )}
+
+        {video && (
+          <div className="rise mb-2 flex items-center gap-2 rounded-xl border border-stroke bg-ink-150 px-2 py-1.5">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={`https://i.ytimg.com/vi/${video.id}/default.jpg`}
+              alt=""
+              className="h-8 w-12 shrink-0 rounded-md object-cover"
+            />
+            <span className="min-w-0 flex-1 truncate text-[0.75rem] text-ink-700">
+              This video will be read
+            </span>
+            <span className="shrink-0 text-[0.6875rem] text-ink-500">
+              title, description and stills
+            </span>
+          </div>
         )}
 
         {attachments.length > 0 && (

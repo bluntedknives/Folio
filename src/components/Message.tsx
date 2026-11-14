@@ -6,7 +6,9 @@ import { Markdown } from "./Markdown";
 import { Thinking } from "./Thinking";
 import { Working } from "./Working";
 import { Sources } from "./Sources";
+import { VideoCard } from "./VideoCard";
 import { copyFormatted } from "@/lib/export";
+import { findVideoUrl } from "@/lib/youtube";
 import { AudioIcon, CheckIcon, CopyIcon, FolioMark, RefreshIcon } from "./icons";
 
 export function MessageBubble({
@@ -32,6 +34,11 @@ export function MessageBubble({
 }
 
 function UserBubble({ message }: { message: ChatMessage }) {
+  // A YouTube link is pulled out of the text and shown as a card instead, so a
+  // long URL does not sit in the middle of the sentence.
+  const video = findVideoUrl(message.content);
+  const body = video ? stripUrl(message.content, video.url) : message.content;
+
   return (
     <div className="rise flex justify-end px-4 py-3 sm:px-6">
       <div className="flex max-w-[min(42rem,85%)] flex-col items-end gap-2">
@@ -59,14 +66,23 @@ function UserBubble({ message }: { message: ChatMessage }) {
             )}
           </div>
         )}
-        {message.content.trim() && (
+        {video && <VideoCard url={video.url} />}
+        {body.trim() && (
           <div className="rounded-3xl rounded-br-lg bg-ink-150 px-4 py-2.5 text-[0.9375rem] leading-relaxed whitespace-pre-wrap text-ink-900">
-            {message.content}
+            {body.trim()}
           </div>
         )}
       </div>
     </div>
   );
+}
+
+/** Removes the video URL from the text, leaving the words around it. */
+function stripUrl(text: string, url: string): string {
+  return text
+    .replace(url, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
 function AssistantBubble({

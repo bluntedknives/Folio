@@ -33,7 +33,8 @@ export function EmptyState({
           {BRAND.tagline}
         </h2>
         <p className="mt-2 max-w-sm text-[0.875rem] leading-relaxed text-ink-500">
-          Paste a question, drop a photo, a PDF or a voice note. The right model is picked for you.
+          Paste a question, drop a photo, a PDF or a voice note, or link a YouTube video. The right
+          model is picked for you.
         </p>
       </div>
 
