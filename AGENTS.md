@@ -72,10 +72,27 @@ authorized through the GitHub connection rather than a secret.
 
 **If a push is denied with `403 ... Permission to <owner>/<repo>.git denied`.**
 Read access working while write fails means the GitHub connection was authorized
-without write permission. `git ls-remote` succeeding is the tell. Fix it in the
-GitHub integration settings by granting write access (Contents: read and write)
-to this repository, then re-run the push. A `403` on push is a permission
-problem, not a bad or expired credential.
+without write permission. `git ls-remote` succeeding is the tell. The brokered
+integration token cannot administer the repo either, so registering a deploy key
+through it fails with `403 Resource not accessible by integration`.
+
+The working fix is an SSH **deploy key** with write access, which bypasses the
+brokered connection entirely:
+
+- The keypair is at `/workspace/.secrets/folio_deploy` (private) and
+  `folio_deploy.pub` (public). `/workspace` is a persistent volume; `~/.ssh` is
+  not, so the key lives outside the home directory on purpose. It sits beside
+  the repo rather than inside it, so it can never be committed.
+- `sh /workspace/.secrets/setup-ssh.sh` rebuilds `~/.ssh` (config, known_hosts,
+  permissions) from that key and is safe to re-run. Run it after a container
+  reset. `openssh-client` may need reinstalling first.
+- The remote uses SSH (`git@github.com:bluntedknives/Folio.git`). An
+  `origin-https` remote is kept as a fallback.
+- The public key must be added on GitHub as a deploy key **with "Allow write
+  access" enabled**, otherwise the push still fails while reads succeed.
+- `Permission denied (publickey)` means the key is offered correctly but is not
+  authorized on GitHub yet. `ssh -v -T git@github.com` shows the fingerprint
+  being offered.
 
 **Never commit a credential.** `.env*` is gitignored and only `.env.example` is
 tracked; keep it that way. Before pushing, confirm with
