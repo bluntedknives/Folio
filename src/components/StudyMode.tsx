@@ -6,11 +6,16 @@ import type { Attachment, ChatMessage } from "@/lib/types";
 import { ChatError, streamChat } from "@/lib/api";
 import { routeFor } from "@/lib/models";
 import {
+  AudioRecorder,
   CaptureError,
   canCaptureScreen,
+  canRecordAudio,
+  frameSignature,
   grabFrame,
+  isBlankSignature,
   pipApi,
   primeVideo,
+  signatureDistance,
   startScreenShare,
 } from "@/lib/capture";
 import { Markdown } from "./Markdown";
@@ -32,6 +37,16 @@ const REVEAL_TICK_MS = 90;
 const DEFAULT_QUESTION = "Read this and solve the question on screen.";
 /** Most turns kept. Only the newest is shown; the rest are history. */
 const MAX_TURNS = 12;
+/** How often the shared screen is sampled for a page change, in ms. */
+const WATCH_TICK_MS = 1200;
+/**
+ * Above this fraction of changed cells the screen counts as a different page.
+ * Calibrated on a worksheet: a moving cursor measures about 0.002 and a
+ * replaced question about 0.009, so this sits clear of both.
+ */
+const PAGE_CHANGE_THRESHOLD = 0.005;
+/** Two samples this close together are treated as the same settled page. */
+const SETTLED_THRESHOLD = 0.003;
 
 interface Turn {
   id: string;
@@ -87,6 +102,11 @@ export function StudyMode({ open, onClose }: { open: boolean; onClose: () => voi
   const turnsRef = useRef<Turn[]>([]);
   /** Whether the caption is pinned to the bottom, like a live transcript. */
   const stick = useRef(true);
+  /** Records the shared stream's sound, when the browser gave us a track. */
+  const audioRef = useRef<AudioRecorder | null>(null);
+  /** Set once the user turns listening on, so a share without audio is visible. */
+  const [listen, setListen] = useState(false);
+  const [hasAudioTrack, setHasAudioTrack] = useState(false);
 
   useEffect(() => {
     busyRef.current = busy;
@@ -101,9 +121,17 @@ export function StudyMode({ open, onClose }: { open: boolean; onClose: () => voi
     inFlight.current.add(controller);
     setBusy(true);
     try {
-      const { model } = routeFor({ hasImages: true, hasAudio: false, prompt: question });
+      // The shared screen's sound, when the user turned listening on. It is
+      // stopped here so each clip is what was said since the last question.
+      const clip = audioRef.current ? await audioRef.current.stop() : null;
+      const attachments = clip ? [attachment, clip] : [attachment];
+      const { model } = routeFor({
+        hasImages: true,
+        hasAudio: Boolean(clip),
+        prompt: question,
+      });
       const history: ChatMessage[] = [
-        { id, role: "user", content: question, attachments: [attachment], createdAt: Date.now() },
+        { id, role: "user", content: question, attachments, createdAt: Date.now() },
       ];
       await streamChat(model, history, question, controller.signal, {
         onReasoning: () => {},
@@ -124,6 +152,9 @@ export function StudyMode({ open, onClose }: { open: boolean; onClose: () => voi
       setTurns((prev) => prev.map((t) => (t.id === id ? { ...t, error: message } : t)));
     } finally {
       inFlight.current.delete(controller);
+      // Listening resumes for the next question, so nothing said in between is
+      // lost and the recorder is not left running across turns.
+      audioRef.current?.start();
       // Only clear the busy flag once every request has finished, so a typed
       // question that overlaps an auto answer does not read as "idle" early.
       if (inFlight.current.size === 0) setBusy(false);
@@ -141,6 +172,13 @@ export function StudyMode({ open, onClose }: { open: boolean; onClose: () => voi
       const asked = question?.trim() ?? "";
       if (busyRef.current && !explicit) return;
 
+      // A frame that is one flat colour is the black gap before a share paints.
+      // Reading it costs a call and comes back as "there is nothing here", so
+      // it is skipped. A typed question is still honoured, since the user may
+      // be looking at a genuinely dark page.
+      const sig = frameSignature(video);
+      if (!explicit && sig && isBlankSignature(sig)) return;
+
       const attachment = grabFrame(video, "Screen");
       if (!attachment) return;
 
@@ -157,9 +195,13 @@ export function StudyMode({ open, onClose }: { open: boolean; onClose: () => voi
   const stopShare = useCallback(() => {
     for (const controller of inFlight.current) controller.abort();
     inFlight.current.clear();
+    // Stopping the recorder first releases its track cleanly.
+    void audioRef.current?.stop();
+    audioRef.current = null;
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
     readSignature.current = null;
+    setHasAudioTrack(false);
     setSharing(false);
     setBusy(false);
   }, []);
@@ -167,13 +209,24 @@ export function StudyMode({ open, onClose }: { open: boolean; onClose: () => voi
   const beginShare = useCallback(async () => {
     setError(null);
     try {
-      const stream = await startScreenShare();
+      // Ask for the shared surface's sound only when the user has listening on,
+      // so a normal share never prompts for something they did not want.
+      const stream = await startScreenShare({ audio: listen });
       const video = videoRef.current;
       if (!video) {
         stream.getTracks().forEach((t) => t.stop());
         return;
       }
       streamRef.current = stream;
+
+      const audioTracks = stream.getAudioTracks();
+      setHasAudioTrack(audioTracks.length > 0);
+      if (audioTracks.length > 0 && canRecordAudio()) {
+        const recorder = new AudioRecorder(new MediaStream(audioTracks));
+        recorder.start();
+        audioRef.current = recorder;
+      }
+
       await primeVideo(stream, video);
       stream.getVideoTracks()[0]?.addEventListener("ended", stopShare);
       readSignature.current = null;
@@ -182,7 +235,36 @@ export function StudyMode({ open, onClose }: { open: boolean; onClose: () => voi
     } catch (err) {
       setError(err instanceof CaptureError ? err.message : "Screen sharing could not start.");
     }
-  }, [stopShare]);
+  }, [listen, stopShare]);
+
+  /**
+   * Re-attaches the live stream after the panel moves into the floating window.
+   *
+   * Opening the float re-parents the panel into the picture-in-picture
+   * document, which adopts the `<video>` into that document and detaches its
+   * stream. The element is left paused with a zero-sized frame, so the stage
+   * renders as a black rectangle and `grabFrame` gets nothing. Handing the same
+   * stream to the freshly mounted element restores both.
+   */
+  useEffect(() => {
+    if (!pipWindow) return;
+    const stream = streamRef.current;
+    if (!stream) return;
+
+    let cancelled = false;
+    void (async () => {
+      const video = videoRef.current;
+      if (!video || cancelled) return;
+      try {
+        await primeVideo(stream, video);
+      } catch {
+        if (!cancelled) setError("The floating window lost the screen. Share again.");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [pipWindow]);
 
   // The reveal. Buffered text plays out at a readable speed, so the answer
   // arrives like a video rather than snapping into place.
@@ -213,6 +295,68 @@ export function StudyMode({ open, onClose }: { open: boolean; onClose: () => voi
     const timer = window.setInterval(() => setElapsed((e) => e + 1), 1000);
     return () => window.clearInterval(timer);
   }, [open, sharing]);
+
+  /**
+   * Watches the shared screen and reads a new page on its own.
+   *
+   * The screen is sampled on a slow timer and compared against the signature of
+   * the last page that was read. A change has to hold for two samples before it
+   * counts, so a cursor, a scroll or a video frame does not trigger a read. The
+   * whole page is never kept: only a 16x16 greyscale fingerprint of what was
+   * last read, which lives in a ref and is dropped when the share stops.
+   */
+  useEffect(() => {
+    if (!open || !sharing) return;
+
+    let candidate: string | null = null;
+    let candidateHits = 0;
+
+    const timer = window.setInterval(() => {
+      // Wait for the current answer before looking again. Crucially the
+      // signature is not updated while busy, so a page that changes mid-answer
+      // is read once the answer finishes rather than being consumed unseen.
+      if (busyRef.current) return;
+
+      const video = videoRef.current;
+      if (!video) return;
+      const sig = frameSignature(video);
+      if (!sig) return;
+      // The black gap before a share paints, and any flat page, are not pages.
+      if (isBlankSignature(sig)) return;
+
+      // Nothing read yet: read what is on screen now.
+      if (readSignature.current === null) {
+        readSignature.current = sig;
+        scan();
+        return;
+      }
+
+      const distance = signatureDistance(sig, readSignature.current);
+      if (distance < PAGE_CHANGE_THRESHOLD) {
+        candidate = null;
+        candidateHits = 0;
+        return;
+      }
+
+      // A change has to be seen twice running before it is believed.
+      if (candidate && signatureDistance(sig, candidate) < SETTLED_THRESHOLD) {
+        candidateHits++;
+      } else {
+        candidate = sig;
+        candidateHits = 1;
+        return;
+      }
+
+      if (candidateHits >= 2) {
+        readSignature.current = sig;
+        candidate = null;
+        candidateHits = 0;
+        scan();
+      }
+    }, WATCH_TICK_MS);
+
+    return () => window.clearInterval(timer);
+  }, [open, sharing, scan]);
 
   // Follow the reveal, unless the user has scrolled up to read something.
   useEffect(() => {
@@ -340,6 +484,16 @@ export function StudyMode({ open, onClose }: { open: boolean; onClose: () => voi
                     ? "Share your screen to begin. Answers play here."
                     : "Screen sharing is not available in this browser."}
                 </p>
+                {canCaptureScreen() && canRecordAudio() && (
+                  <label className="study-listen">
+                    <input
+                      type="checkbox"
+                      checked={listen}
+                      onChange={(e) => setListen(e.target.checked)}
+                    />
+                    <span>Also listen to the audio</span>
+                  </label>
+                )}
                 <button
                   type="button"
                   onClick={() => void beginShare()}
@@ -355,6 +509,12 @@ export function StudyMode({ open, onClose }: { open: boolean; onClose: () => voi
               <span className="study-veil">
                 <span className="study-veil-dot" />
                 {busy ? "Reading" : playing ? "Answering" : "Watching"}
+              </span>
+            )}
+            {sharing && listen && !hasAudioTrack && (
+              <span className="study-veil study-veil-paused" style={{ left: "auto", right: "0.6rem" }}>
+                <span className="study-veil-dot" />
+                No audio in this share
               </span>
             )}
             {sharing && error && (
