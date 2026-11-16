@@ -261,3 +261,33 @@ HEAD:main`); keep it that way rather than merging, so the two stay identical.
   think you should" did not stop a one-line question getting an essay; naming
   the bands (one-liner, normal, explicit essay) and adding a final
   delete-anything-that-is-not-the-answer pass did. Keep the concrete examples.
+- Reading a linked page reuses the video path's shape: the URL is the only
+  thing that travels, the server fetches it per turn, and nothing is stored.
+  Search is skipped when a page is linked, because the page is the source.
+- `page-server.ts` refuses a URL unless it is http(s) on port 80/443, resolves
+  to public addresses only, and every redirect hop is re-checked. The private
+  and link-local ranges are refused in both IP versions; the link-local block
+  is what stops a fetch from reaching the cloud metadata address. Redirects are
+  followed by hand, so a public URL cannot bounce the fetch inward. There is a
+  residual DNS-rebinding window between the address check and the request; it
+  is noted in the module rather than pretended away.
+- Study mode's stage went black when floated on top because portalling the
+  panel into the picture-in-picture document adopts the `<video>` into that
+  document, which detaches its stream: the element returns paused with a
+  zero-sized frame, and `grabFrame` then reads a `videoWidth` of 0. Any panel
+  that moves between documents must re-attach the stream afterwards. Do not
+  portal a live `<video>` without this.
+- Screen-change detection compares a 64x64 greyscale fingerprint and counts
+  changed cells, not the mean difference. On ink on white the mean is useless:
+  two different questions measured 0.0024 apart at 16x16, under a 0.06
+  threshold, so nothing would ever have triggered. The count separates a moving
+  cursor (0.0020) from replaced questions (0.0088). Calibrate with
+  `signatureDistance` against a real page before changing `SIGNATURE_EDGE` or
+  the thresholds in `StudyMode.tsx`; the numbers are measurements, not guesses.
+- Study mode's audio is the shared surface's track, recorded per question and
+  sent as a clip. `getDisplayMedia` only offers it for a tab or the whole
+  screen, and only Chromium, so a missing track is normal and is surfaced in
+  the UI rather than treated as an error.
+- Image generation is not available on this account. All 33 models are text,
+  vision or audio, and `/v1/images/generations` returns 404. Do not build a
+  feature that assumes it; re-check before promising it.
