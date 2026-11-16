@@ -105,8 +105,64 @@ interface Options {
   connect?: boolean;
 }
 
+/** Characters a model may emit that mean something else in an expression. */
+const UNICODE_OPS: [RegExp, string][] = [
+  [/\u2212/g, "-"], // minus sign
+  [/\u00d7/g, "*"], // multiplication sign
+  [/\u00f7/g, "/"], // division sign
+  [/\u2013|\u2014/g, "-"], // en/em dash
+  [/\u00a0/g, " "], // non-breaking space
+  [/\u2070/g, "^0"],
+  [/\u00b9/g, "^1"],
+  [/\u00b2/g, "^2"],
+  [/\u00b3/g, "^3"],
+  [/\u2074/g, "^4"],
+  [/\u2075/g, "^5"],
+  [/\u2076/g, "^6"],
+  [/\u2077/g, "^7"],
+  [/\u2078/g, "^8"],
+  [/\u2079/g, "^9"],
+];
+
+/**
+ * Rewrites LaTeX a model may leak into a spec into plain expression syntax.
+ * The fence is meant to be a bare line language, but a model that has just
+ * written prose maths will often start a formula with \frac or \left.
+ */
+function stripLatex(input: string): string {
+  let s = input;
+  // \frac{a}{b} -> ((a)/(b)); repeated so a nested fraction also resolves.
+  for (let i = 0; i < 4 && /\\[dt]?frac/.test(s); i++) {
+    s = s.replace(/\\[dt]?frac\s*\{([^{}]*)\}\s*\{([^{}]*)\}/g, "(($1)/($2))");
+  }
+  s = s.replace(/\\(cdot|times)\b/g, "*");
+  s = s.replace(/\\div\b/g, "/");
+  s = s.replace(/\\sqrt\s*\{([^{}]*)\}/g, "sqrt($1)");
+  s = s.replace(/\\(left|right|quad|qquad)\b/g, "");
+  s = s.replace(/\\[!,;:]/g, "");
+  s = s.replace(/\^\{([^{}]*)\}/g, "^$1");
+  s = s.replace(/_\{([^{}]*)\}/g, "_$1");
+  return s;
+}
+
+/** Trims a line and removes the decoration a model adds when listing a spec. */
+function normaliseLine(raw: string): string {
+  let line = raw.replace(/\r/g, "").trim();
+  line = line.replace(/^[-*\u2022\u00b7]\s+/, "").replace(/^\d+[.)]\s+/, "");
+  for (const [re, to] of UNICODE_OPS) line = line.replace(re, to);
+  return stripLatex(line).trim();
+}
+
+/** A single line may carry several statements separated by semicolons. */
+function splitStatements(line: string): string[] {
+  return line
+    .split(";")
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
+
 export function parseGraphSpec(source: string): GraphParse {
-  const lines = source.split("\n");
+  const lines = source.split("\n").flatMap((raw) => splitStatements(normaliseLine(raw)));
   const spec: GraphSpec = {
     xMin: -10,
     xMax: 10,
@@ -116,6 +172,14 @@ export function parseGraphSpec(source: string): GraphParse {
     params: [],
     tables: [],
   };
+  /**
+   * Lines that could not be read. They do not abort the parse: a spec with one
+   * stray line still has a graph in it, and dropping the whole plot because a
+   * model wrote one formula in an unsupported form is the difference between a
+   * drawn answer and no answer. The first problem is only reported when nothing
+   * at all could be drawn.
+   */
+  const problems: string[] = [];
   let nextColor = 0;
   const takeColor = (explicit?: string) => explicit ?? PALETTE[nextColor++ % PALETTE.length];
   const params = new Map<string, ParamSpec>();
@@ -123,6 +187,8 @@ export function parseGraphSpec(source: string): GraphParse {
   for (const rawLine of lines) {
     const line = rawLine.trim();
     if (!line || line.startsWith("#")) continue;
+    // The fence tag sometimes lands on its own line rather than the opening one.
+    if (/^(graph|plot|chart)$/i.test(line)) continue;
 
     const lower = line.toLowerCase();
 
@@ -136,7 +202,10 @@ export function parseGraphSpec(source: string): GraphParse {
         takeColor(options.color),
         options,
       );
-      if (!table) return fail(`Could not read the table "${line}". Use table x: 1, 2 | y: 3, 4.`);
+      if (!table) {
+        problems.push(`Could not read the table "${line}". Use table x: 1, 2 | y: 3, 4.`);
+        continue;
+      }
       spec.tables.push(table);
       continue;
     }
@@ -151,14 +220,20 @@ export function parseGraphSpec(source: string): GraphParse {
 
     if (lower.startsWith("x:")) {
       const range = parseRange(body.slice(2).trim());
-      if (!range) return fail(`Could not read the x range "${body.slice(2).trim()}". Use x: -10..10.`);
+      if (!range) {
+        problems.push(`Could not read the x range "${body.slice(2).trim()}". Use x: -10..10.`);
+        continue;
+      }
       [spec.xMin, spec.xMax] = range;
       continue;
     }
 
     if (lower.startsWith("y:")) {
       const range = parseRange(body.slice(2).trim());
-      if (!range) return fail(`Could not read the y range "${body.slice(2).trim()}". Use y: -5..5.`);
+      if (!range) {
+        problems.push(`Could not read the y range "${body.slice(2).trim()}". Use y: -5..5.`);
+        continue;
+      }
       [spec.yMin, spec.yMax] = range;
       continue;
     }
@@ -166,10 +241,16 @@ export function parseGraphSpec(source: string): GraphParse {
     if (lower.startsWith("point")) {
       const rest = body.slice(5).replace(/[()]/g, "").trim();
       const coords = rest.split(",").map((p) => p.trim());
-      if (coords.length !== 2) return fail(`Could not read the point "${body}". Use point (1, 2).`);
+      if (coords.length !== 2) {
+        problems.push(`Could not read the point "${body}". Use point (1, 2).`);
+        continue;
+      }
       const x = constant(coords[0]);
       const y = constant(coords[1]);
-      if (x === null || y === null) return fail(`Could not read the point "${body}".`);
+      if (x === null || y === null) {
+        problems.push(`Could not read the point "${body}".`);
+        continue;
+      }
       spec.points.push({ x, y, color: takeColor(options.color), label: options.label });
       continue;
     }
@@ -178,7 +259,10 @@ export function parseGraphSpec(source: string): GraphParse {
       const rest = body.slice(4).trim();
       const vertical = /^x\s*=/.test(rest);
       const value = constant(rest.replace(/^[xy]\s*=\s*/, "").trim());
-      if (value === null) return fail(`Could not read the line "${body}". Use line y = 3.`);
+      if (value === null) {
+        problems.push(`Could not read the line "${body}". Use line y = 3.`);
+        continue;
+      }
       spec.lines.push({
         axis: vertical ? "v" : "h",
         value,
@@ -203,13 +287,16 @@ export function parseGraphSpec(source: string): GraphParse {
     try {
       compiled = compileExpression(expr);
     } catch (error) {
-      return fail(`Could not read the formula "${expr}": ${(error as Error).message}`);
+      // An implicit relation like "x^2 + y^2 = 1" lands here: the evaluator only
+      // draws y as a function of x. The prose answer covers it.
+      problems.push(`Could not read the formula "${expr}": ${(error as Error).message}`);
+      continue;
     }
 
     const needed = parametersOf(expr);
     const scope = scopeFrom(params, needed);
 
-    // Verify it produces at least one finite value so we never render a blank card.
+    // A curve with no finite value in range would draw as an empty card.
     let anyFinite = false;
     for (let i = 0; i <= 40; i++) {
       const x = spec.xMin + ((spec.xMax - spec.xMin) * i) / 40;
@@ -218,7 +305,10 @@ export function parseGraphSpec(source: string): GraphParse {
         break;
       }
     }
-    if (!anyFinite) return fail(`"${expr}" has no finite values in the given range.`);
+    if (!anyFinite) {
+      problems.push(`"${expr}" has no finite values in the given range.`);
+      continue;
+    }
 
     spec.plots.push({
       expr,
@@ -245,7 +335,8 @@ export function parseGraphSpec(source: string): GraphParse {
     spec.lines.length === 0 &&
     spec.tables.length === 0
   ) {
-    return fail("A graph needs at least one curve, point or line.");
+    // Nothing drawable: the most specific complaint is the useful one.
+    return fail(problems[0] ?? "A graph needs at least one curve, point or line.");
   }
   if (spec.xMax <= spec.xMin) return fail("The x range is empty. Use x: -10..10.");
 

@@ -19,6 +19,7 @@ import {
 import { conversationToMarkdown, downloadText, safeFilename } from "@/lib/export";
 import { Sidebar } from "./Sidebar";
 import { MessageBubble } from "./Message";
+import Link from "next/link";
 import { Composer } from "./Composer";
 import { EmptyState } from "./EmptyState";
 import { Plotter } from "./Plotter";
@@ -464,6 +465,22 @@ export function Chat() {
           onStop={stop}
           onOpenPlotter={() => setPlotterOpen(true)}
         />
+
+        {/*
+          A study tool is used by students, so the terms need to be visible
+          without being hunted for, and an AI answer needs a visible warning
+          that it can be wrong. One quiet line under the composer does both.
+        */}
+        <p className="chat-notice">
+          Answers can be wrong. Check anything that matters.{" "}
+          <Link href="/terms" className="legal-link">
+            Terms
+          </Link>
+          {" · "}
+          <Link href="/privacy" className="legal-link">
+            Privacy
+          </Link>
+        </p>
       </main>
     </div>
   );

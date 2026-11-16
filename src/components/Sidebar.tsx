@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import Link from "next/link";
 import type { ConversationSummary } from "@/lib/store";
 import { clearAll, storedBytes } from "@/lib/store";
 import { BRAND } from "@/lib/brand";
@@ -175,6 +176,18 @@ export function Sidebar({
               </div>
             )}
           </div>
+
+          <nav className="mt-1 flex items-center gap-2 px-1.5 pt-1.5">
+            <Link href="/terms" className="legal-link">
+              Terms
+            </Link>
+            <span aria-hidden className="text-ink-400">
+              ·
+            </span>
+            <Link href="/privacy" className="legal-link">
+              Privacy
+            </Link>
+          </nav>
         </div>
       </aside>
     </>

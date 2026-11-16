@@ -325,12 +325,68 @@ export function StudyMode({ open, onClose }: { open: boolean; onClose: () => voi
     setBusy(false);
   }, []);
 
+  const popOut = useCallback(async () => {
+    const pip = pipApi();
+    if (!pip) {
+      setError("This browser cannot float the panel. Chrome and Edge can.");
+      return;
+    }
+    try {
+      // The panel is portalled in, so its own size is the only thing that
+      // carries over: ask for a tall window and let the CSS fill it.
+      const win = await pip.requestWindow({ width: 480, height: 780 });
+      copyStyles(document, win.document);
+      const observer = new MutationObserver(() => {
+        win.document.documentElement.className = document.documentElement.className;
+      });
+      observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
+      win.addEventListener("pagehide", () => observer.disconnect());
+      setPipWindow(win);
+      setMinimized(false);
+      return win;
+    } catch {
+      setError("The floating window could not open.");
+      return null;
+    }
+  }, []);
+
   const beginShare = useCallback(async () => {
     setError(null);
     try {
-      // Ask for the shared surface's sound only when the user has listening on,
-      // so a normal share never prompts for something they did not want.
-      const stream = await startScreenShare({ audio: listen });
+      /*
+       * Both requests go out on the same click, and they go out *before* either
+       * is awaited.
+       *
+       * Picking a screen to share consumes the click's transient activation, so
+       * opening the floating window afterwards is refused with NotAllowedError —
+       * the window would silently fail and the panel would stay on the page.
+       * Starting both calls synchronously means both are admitted while the
+       * click is still live, which is what lets the share open the floating
+       * window by itself with no second gesture.
+       *
+       * If the user cancels the picker, the window that was already opened is
+       * closed again, so a cancelled share leaves nothing behind.
+       */
+      const wantFloat = Boolean(pipApi());
+      const floatPromise = wantFloat ? popOut() : null;
+      const sharePromise = startScreenShare({ audio: listen });
+
+      // A cancelled picker is the common case, so it is handled before the
+      // share is unwrapped: the window that was already opened is closed again
+      // and no error is shown, because the user chose to cancel.
+      const shareSettled = await sharePromise.then(
+        (stream) => ({ ok: true as const, stream }),
+        (err: unknown) => ({ ok: false as const, err }),
+      );
+      if (!shareSettled.ok) {
+        if (shareSettled.err instanceof CaptureError && /cancelled/i.test(shareSettled.err.message)) {
+          (await floatPromise)?.close();
+          return;
+        }
+        throw shareSettled.err;
+      }
+      const stream = shareSettled.stream;
+
       const video = videoRef.current;
       if (!video) {
         stream.getTracks().forEach((t) => t.stop());
@@ -354,7 +410,7 @@ export function StudyMode({ open, onClose }: { open: boolean; onClose: () => voi
     } catch (err) {
       setError(err instanceof CaptureError ? err.message : "Screen sharing could not start.");
     }
-  }, [listen, stopShare]);
+  }, [listen, popOut, stopShare]);
 
   /**
    * Re-attaches the live stream after the panel moves into the floating window.
@@ -371,17 +427,35 @@ export function StudyMode({ open, onClose }: { open: boolean; onClose: () => voi
     if (!stream) return;
 
     let cancelled = false;
-    void (async () => {
+
+    /*
+     * Re-attach, then verify.
+     *
+     * Opening the float re-parents the panel into the other document, and the
+     * `<video>` is adopted along with it, which drops its stream. Whether that
+     * happens before or after this effect runs depends on the order React
+     * commits the portal and flushes this effect, so a single attempt is a race:
+     * when the adoption lands second it silently wins and the stage goes black.
+     * Re-checking after the browser has settled makes the outcome the same
+     * either way.
+     */
+    const attach = async () => {
       const video = videoRef.current;
       if (!video || cancelled) return;
+      if (video.srcObject === stream && video.readyState >= 2 && !video.paused) return;
       try {
         await primeVideo(stream, video);
       } catch {
         if (!cancelled) setError("The floating window lost the screen. Share again.");
       }
-    })();
+    };
+
+    void attach();
+    const retry = setTimeout(() => void attach(), 300);
+
     return () => {
       cancelled = true;
+      if (retry) clearTimeout(retry);
     };
   }, [pipWindow]);
 
@@ -491,23 +565,6 @@ export function StudyMode({ open, onClose }: { open: boolean; onClose: () => voi
 
   // Releasing the stream on unmount stops the browser's sharing indicator.
   useEffect(() => stopShare, [stopShare]);
-
-  const popOut = useCallback(async () => {
-    const pip = pipApi();
-    if (!pip) return;
-    try {
-      const win = await pip.requestWindow({ width: 460, height: 640 });
-      copyStyles(document, win.document);
-      const observer = new MutationObserver(() => {
-        win.document.documentElement.className = document.documentElement.className;
-      });
-      observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
-      win.addEventListener("pagehide", () => observer.disconnect());
-      setPipWindow(win);
-    } catch {
-      setError("The floating window could not open.");
-    }
-  }, []);
 
   const close = useCallback(() => {
     pipWindow?.close();
@@ -680,6 +737,13 @@ export function StudyMode({ open, onClose }: { open: boolean; onClose: () => voi
                     if (file) void addPhoto(file);
                   }}
                 />
+                {/*
+                  The error veil below is gated on `sharing`, so a share that
+                  never started had nowhere to report itself and the button just
+                  looked inert. This is the one place a failure before the first
+                  frame can be seen.
+                */}
+                {error && <p className="study-stage-error">{error}</p>}
               </div>
             )}
             {sharing && (

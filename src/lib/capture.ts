@@ -156,13 +156,25 @@ function blobToDataUrl(blob: Blob): Promise<string> {
 
 /** Attaches a stream to a muted video element and waits for the first frame. */
 export async function primeVideo(stream: MediaStream, video: HTMLVideoElement): Promise<void> {
+  // Already showing this stream: a second play() would race the first and
+  // reject with AbortError, which callers would report as a failure.
+  if (video.srcObject === stream && video.readyState >= 2) return;
+
   video.srcObject = stream;
   video.muted = true;
   video.playsInline = true;
   await video.play();
   if (video.readyState < 2) {
+    // Bounded, because a frame that never arrives would otherwise leave the
+    // caller awaiting forever and the UI stuck before it ever reports "live".
     await new Promise<void>((resolve) => {
-      video.addEventListener("loadeddata", () => resolve(), { once: true });
+      const done = () => {
+        clearTimeout(timer);
+        video.removeEventListener("loadeddata", done);
+        resolve();
+      };
+      const timer = setTimeout(done, 3000);
+      video.addEventListener("loadeddata", done, { once: true });
     });
   }
 }

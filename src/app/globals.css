@@ -1004,16 +1004,182 @@ input {
   display: none;
 }
 
-.study-floating {
+/*
+ * The floating window, and the expanded player.
+ *
+ * Both fill their host and hold their own scroll regions. The panel is a column
+ * of fixed-height parts (head, stage, transport) above one flexible part (the
+ * caption), and it is the caption that scrolls. `min-height: 0` on that flexible
+ * part is what makes it work: a flex item defaults to `min-height: auto`, which
+ * refuses to shrink below its content, so a long answer pushed the panel taller
+ * than its container instead of scrolling inside it. That is the bug where the
+ * popup would not scroll. Every wrapper on the way down needs the same
+ * treatment, since each one is a flex item too.
+ */
+.study-floating,
+.study-floating.study-panel {
   position: static;
   inset: auto;
   width: 100%;
   height: 100vh;
   max-height: none;
+  min-height: 0;
   border: 0;
   border-radius: 0;
   box-shadow: none;
   animation: none;
+  overflow: hidden;
+}
+.study-floating .study-caption {
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+}
+.study-floating .study-stage {
+  aspect-ratio: auto;
+  height: 42vh;
+  max-height: 42vh;
+}
+/* The stage is the point of the window, so it takes the slack. */
+.study-floating .study-photo {
+  object-fit: contain;
+}
+
+/*
+ * Legal pages.
+ *
+ * The app itself never scrolls, but these pages must, so they are allowed to
+ * own the viewport. Type is kept narrow enough to read and the palette comes
+ * from the same tokens as the app, so following a link from the sidebar does
+ * not feel like leaving the product.
+ */
+.legal-shell {
+  height: 100%;
+  overflow-y: auto;
+  background: var(--ink-050);
+  color: var(--ink-800);
+}
+.legal-page {
+  max-width: 44rem;
+  margin: 0 auto;
+  padding: 4.5rem 1.5rem 6rem;
+}
+.legal-head {
+  padding-bottom: 1.75rem;
+  border-bottom: 1px solid var(--stroke);
+}
+.legal-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin-bottom: 2.25rem;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--ink-600);
+  text-decoration: none;
+  transition: color 0.15s var(--ease-out);
+}
+.legal-back:hover {
+  color: var(--ink-900);
+}
+.legal-page h1 {
+  margin: 0;
+  font-size: 1.9rem;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  color: var(--ink-900);
+}
+.legal-summary {
+  margin: 0.75rem 0 0;
+  font-size: 1rem;
+  line-height: 1.6;
+  color: var(--ink-700);
+}
+.legal-updated {
+  margin: 1.1rem 0 0;
+  font-size: 0.75rem;
+  letter-spacing: 0.01em;
+  color: var(--ink-500);
+}
+.legal-section {
+  padding-top: 2rem;
+}
+.legal-section h2 {
+  margin: 0 0 0.7rem;
+  font-size: 1.0625rem;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  color: var(--ink-900);
+}
+.legal-section p {
+  margin: 0 0 0.85rem;
+  font-size: 0.9375rem;
+  line-height: 1.72;
+  color: var(--ink-700);
+}
+.legal-section ul {
+  margin: 0 0 0.85rem;
+  padding-left: 1.1rem;
+  list-style: none;
+}
+.legal-section li {
+  position: relative;
+  margin-bottom: 0.5rem;
+  font-size: 0.9375rem;
+  line-height: 1.72;
+  color: var(--ink-700);
+}
+.legal-section li::before {
+  content: "";
+  position: absolute;
+  left: -1.05rem;
+  top: 0.68em;
+  width: 4px;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--ink-400);
+}
+.legal-foot {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-top: 3.25rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--stroke);
+  font-size: 0.8125rem;
+  color: var(--ink-500);
+}
+.legal-foot a {
+  color: var(--ink-600);
+  text-decoration: none;
+  transition: color 0.15s var(--ease-out);
+}
+.legal-foot a:hover {
+  color: var(--ink-900);
+}
+
+/* The sidebar's links to the legal pages: present, but not competing with the
+   composer for attention. */
+.legal-link {
+  font-size: 0.6875rem;
+  color: var(--ink-500);
+  text-decoration: none;
+  transition: color 0.15s var(--ease-out);
+}
+.legal-link:hover {
+  color: var(--ink-800);
+}
+
+/* The disclaimer line under the composer. Deliberately faint: it must be
+   present, and it must not read as a control. */
+.chat-notice {
+  margin: 0.5rem 0 0;
+  padding-bottom: 0.5rem;
+  font-size: 0.6875rem;
+  line-height: 1.4;
+  color: var(--ink-500);
+  text-align: center;
 }
 
 @keyframes study-in {
@@ -1227,21 +1393,15 @@ input {
   height: min(90vh, 44rem);
   max-height: none;
 }
-/* The caption takes the space the stage does not, so the answer is roomy. */
+/*
+ * The caption takes whatever the stage leaves. It must be allowed to shrink to
+ * nothing (`min-height: 0`) rather than holding a fixed floor: the panel can now
+ * be dragged down to a small height, and a floor larger than the space left over
+ * would push the caption past the panel's clipped edge, where it cannot be
+ * reached or scrolled.
+ */
 .study-player .study-caption {
-  min-height: 11rem;
-}
-/* The player fills the floating window, and the screen when expanded. */
-.study-floating.study-panel {
-  position: static;
-  inset: auto;
-  width: 100%;
-  height: 100vh;
-  max-height: none;
-  border: 0;
-  border-radius: 0;
-  box-shadow: none;
-  animation: none;
+  min-height: 0;
 }
 .study-panel:fullscreen {
   position: fixed;
@@ -1274,8 +1434,7 @@ input {
    and the answer below the fold, so the expanded player looked like a black
    screen with a title on it. Bounding the stage by height keeps the answer
    visible, and `contain` letterboxes the capture inside it. */
-.study-panel:fullscreen .study-stage,
-.study-floating .study-stage {
+.study-panel:fullscreen .study-stage {
   aspect-ratio: auto;
   height: 46vh;
   max-height: 46vh;
@@ -1354,6 +1513,16 @@ input {
   flex-wrap: wrap;
   gap: 0.4rem;
   justify-content: center;
+}
+
+/* A share that never started reports itself here, on the idle stage. */
+.study-stage-error {
+  max-width: 22rem;
+  margin: 0.1rem 0 0;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  color: var(--danger, #f7768e);
+  text-align: center;
 }
 
 /* A photo takes the stage exactly like a live frame does. */

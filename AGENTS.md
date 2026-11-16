@@ -291,3 +291,14 @@ HEAD:main`); keep it that way rather than merging, so the two stay identical.
 - Image generation is not available on this account. All 33 models are text,
   vision or audio, and `/v1/images/generations` returns 404. Do not build a
   feature that assumes it; re-check before promising it.
+- The legal pages (`/terms`, `/privacy`) are statically prerendered and carry
+  no scripts. Their wording lives in `src/lib/legal.ts` so it can be reviewed
+  apart from its presentation, and it deliberately describes what the code
+  actually does: history in IndexedDB only, images re-encoded to drop EXIF, the
+  API key server-side, content forwarded to the model provider. Do not edit the
+  policies into stronger privacy claims than the code supports, and do not
+  describe them as legal advice. `LEGAL.operator`, `LEGAL.jurisdiction` and
+  `LEGAL.contact` are placeholders that must be replaced before launch.
+- The legal pages are the only routes that scroll; the chat screen still does
+  not. They reuse the app's tokens so following a link does not feel like
+  leaving the product. `app/not-found.tsx` shares their shell.
