@@ -122,6 +122,28 @@ tracked; keep it that way. Before pushing, confirm with
 `git grep -nE "(nvapi-[A-Za-z0-9_-]{15,}|gh[pous]_[A-Za-z0-9]{20,}|github_pat_)"`
 that nothing leaked into a tracked file.
 
+## Deploying (Vercel)
+
+Vercel builds **`main`**. A feature that exists only on a side branch is not
+live, however green the preview is: video support was once complete and tested
+on `feat/desmos-graphing` while `main` had no `youtube*.ts` at all, so the
+deployed app answered a video question with an improvised monologue. Before
+reporting a feature broken, confirm the code is on `main`:
+
+```
+git ls-tree -r --name-only origin/main | grep -iE "youtube"
+```
+
+**Vercel needs `NVIDIA_API_KEY` set in the project's environment variables.**
+`.env.local` is gitignored and does not travel with the repo, so a fresh
+deployment answers every request with `Server is missing NVIDIA_API_KEY`. Set
+it under Project -> Settings -> Environment Variables for Production, Preview
+and Development, then redeploy. This step is manual: it cannot be done from
+here.
+
+`main` has been a clean fast-forward of the feature branch (`git push origin
+HEAD:main`); keep it that way rather than merging, so the two stay identical.
+
 ## Gotchas
 
 - `next dev` rewrites the block at the top of this file. Commit it with your
