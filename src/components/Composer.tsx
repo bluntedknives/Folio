@@ -2,8 +2,9 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { Attachment } from "@/lib/types";
-import { AudioIcon, DocumentIcon, ImageIcon, PlotIcon, SendIcon, StopIcon, XIcon } from "./icons";
+import { AudioIcon, DocumentIcon, GlobeIcon, ImageIcon, PlotIcon, SendIcon, StopIcon, XIcon } from "./icons";
 import { findVideoUrl } from "@/lib/youtube";
+import { findWebLinks } from "@/lib/urls";
 import {
   AttachmentRejected,
   MAX_ATTACHMENTS,
@@ -83,6 +84,8 @@ export function Composer({
   // A pasted YouTube link is announced before sending, so it is clear the video
   // will be read rather than just treated as text.
   const video = findVideoUrl(text);
+  // Any other link is read as a web page, and said so for the same reason.
+  const pages = video ? [] : findWebLinks(text);
 
   return (
     <div className="px-3 pt-1 pb-4 sm:px-6">
@@ -105,6 +108,18 @@ export function Composer({
             <span className="shrink-0 text-[0.6875rem] text-ink-500">
               title, description and stills
             </span>
+          </div>
+        )}
+
+        {pages.length > 0 && (
+          <div className="rise mb-2 flex items-center gap-2 rounded-xl border border-stroke bg-ink-150 px-2.5 py-1.5">
+            <GlobeIcon className="h-3.5 w-3.5 shrink-0 text-ink-600" />
+            <span className="min-w-0 flex-1 truncate text-[0.75rem] text-ink-700">
+              {pages.length === 1
+                ? `Web page will be read: ${pages[0].host}`
+                : `${pages.length} web pages will be read`}
+            </span>
+            <span className="shrink-0 text-[0.6875rem] text-ink-500">its text</span>
           </div>
         )}
 

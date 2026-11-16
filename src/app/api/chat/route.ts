@@ -2,7 +2,9 @@ import { readChatRequest } from "@/lib/validation";
 import { SYSTEM_PROMPT, getModel, routeFor, thinkingFor } from "@/lib/models";
 import { formatSources, search, shouldSearch } from "@/lib/search";
 import { formatUnreadableVideo, formatVideo, loadVideo } from "@/lib/youtube-server";
+import { formatPages, loadPages } from "@/lib/page-server";
 import { latestVideoId } from "@/lib/youtube";
+import { latestWebLinks } from "@/lib/urls";
 import type { Source, WireMessage, WirePart } from "@/lib/types";
 
 export const maxDuration = 120;
@@ -26,12 +28,22 @@ export async function POST(request: Request) {
   const videoId = parsed.body.videoId ?? latestVideoId(parsed.body.messages);
   const video = videoId ? await loadVideo(videoId) : null;
 
+  // Any other web link in the conversation is fetched and its readable text is
+  // folded into the prompt, so a question about a page is answered from the
+  // page rather than from memory. The links are read from the messages rather
+  // than from the client, so the same validation applies to both.
+  const links = videoId
+    ? []
+    : latestWebLinks(parsed.body.messages.map((m) => ({ role: m.role, content: m.content })));
+  const pages = links.length ? await loadPages(links.map((l) => l.url)) : [];
+
   // Search runs on the server, before the model call, so the results can be
   // folded into the system prompt. A failure here just means no web context.
   // A video question is answered from the video, so search is skipped: the
   // question is usually "what is this" and the open web has nothing to add.
+  // A linked page is skipped for the same reason: its own text is the source.
   let sources: Source[] = [];
-  if (!videoId && parsed.body.query && shouldSearch(parsed.body.query)) {
+  if (!videoId && pages.length === 0 && parsed.body.query && shouldSearch(parsed.body.query)) {
     sources = await search(parsed.body.query);
   }
 
@@ -43,7 +55,19 @@ export async function POST(request: Request) {
       ? formatUnreadableVideo(videoId)
       : "";
 
-  const extras = [sources.length ? formatSources(sources) : "", videoBlock]
+  // The same for a page: a link that could not be fetched is still a link the
+  // student gave, and the model must not answer as if nothing were attached.
+  const pageBlock = pages.length
+    ? formatPages(pages)
+    : links.length
+      ? `A web page was linked but could not be read: ${links.map((l) => l.url).join(", ")}. Say in one short line that you could not read it, and offer to help if the student pastes the text.`
+      : "";
+
+  const extras = [
+    sources.length ? formatSources(sources) : "",
+    videoBlock,
+    pageBlock,
+  ]
     .filter(Boolean)
     .join("\n\n");
   const systemPrompt = extras ? `${SYSTEM_PROMPT}\n\n${extras}` : SYSTEM_PROMPT;

@@ -64,6 +64,21 @@ export interface VideoContext {
   frames: string[];
 }
 
+/**
+ * What could be read from a web page. The text is the page's own readable
+ * content, stripped of navigation and scripts, and it may be truncated. It is
+ * not a summary, and the answer has to cite it rather than invent beyond it.
+ */
+export interface PageContext {
+  url: string;
+  title: string;
+  /** Publisher, from the site name or the host. */
+  site: string;
+  /** Human date, when the page declared one. */
+  published: string;
+  text: string;
+}
+
 export interface Conversation {
   id: string;
   title: string;

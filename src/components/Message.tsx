@@ -7,8 +7,10 @@ import { Thinking } from "./Thinking";
 import { Working } from "./Working";
 import { Sources } from "./Sources";
 import { VideoCard } from "./VideoCard";
+import { PageCard } from "./PageCard";
 import { copyFormatted } from "@/lib/export";
 import { findVideoUrl } from "@/lib/youtube";
+import { findWebLinks } from "@/lib/urls";
 import { AudioIcon, CheckIcon, CopyIcon, FolioMark, RefreshIcon } from "./icons";
 
 export function MessageBubble({
@@ -34,10 +36,15 @@ export function MessageBubble({
 }
 
 function UserBubble({ message }: { message: ChatMessage }) {
-  // A YouTube link is pulled out of the text and shown as a card instead, so a
-  // long URL does not sit in the middle of the sentence.
+  // A link is pulled out of the text and shown as a card instead, so a long
+  // URL does not sit in the middle of the sentence. YouTube gets the video
+  // card, every other address gets the page card.
   const video = findVideoUrl(message.content);
-  const body = video ? stripUrl(message.content, video.url) : message.content;
+  const pages = video ? [] : findWebLinks(message.content);
+  const body = stripLinks(message.content, [
+    ...(video ? [video.url] : []),
+    ...pages.map((p) => p.url),
+  ]);
 
   return (
     <div className="rise flex justify-end px-4 py-3 sm:px-6">
@@ -67,6 +74,9 @@ function UserBubble({ message }: { message: ChatMessage }) {
           </div>
         )}
         {video && <VideoCard url={video.url} />}
+        {pages.map((page) => (
+          <PageCard key={page.url} url={page.url} />
+        ))}
         {body.trim() && (
           <div className="rounded-3xl rounded-br-lg bg-ink-150 px-4 py-2.5 text-[0.9375rem] leading-relaxed whitespace-pre-wrap text-ink-900">
             {body.trim()}
@@ -77,12 +87,11 @@ function UserBubble({ message }: { message: ChatMessage }) {
   );
 }
 
-/** Removes the video URL from the text, leaving the words around it. */
-function stripUrl(text: string, url: string): string {
-  return text
-    .replace(url, "")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
+/** Removes the link URLs from the text, leaving the words around them. */
+function stripLinks(text: string, urls: string[]): string {
+  let out = text;
+  for (const url of urls) out = out.replace(url, "");
+  return out.replace(/\n{3,}/g, "\n\n").trim();
 }
 
 function AssistantBubble({
