@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { createPortal } from "react-dom";
 import type { Attachment, ChatMessage } from "@/lib/types";
 import { ChatError, streamChat } from "@/lib/api";
@@ -19,11 +19,13 @@ import {
   startScreenShare,
 } from "@/lib/capture";
 import { Markdown } from "./Markdown";
+import { AttachmentRejected, readAttachment } from "@/lib/attachment";
 import {
   ChevronDownIcon,
   ChevronUpIcon,
   CollapseIcon,
   ExpandIcon,
+  ImageIcon,
   PopOutIcon,
   ScreenIcon,
   XIcon,
@@ -47,6 +49,32 @@ const WATCH_TICK_MS = 1200;
 const PAGE_CHANGE_THRESHOLD = 0.005;
 /** Two samples this close together are treated as the same settled page. */
 const SETTLED_THRESHOLD = 0.003;
+/**
+ * How small the panel may be dragged. The lower bound is generous enough to
+ * stay usable: below this the stage, the caption and the transport cannot all
+ * be on screen at once, and the panel stops being a panel.
+ */
+const MIN_PANEL_W = 300;
+const MIN_PANEL_H = 360;
+/** The largest the panel may be dragged, leaving a margin against the edge. */
+const PANEL_MARGIN = 24;
+/** Fraction of the viewport the panel may occupy at most. */
+const MAX_PANEL_FRACTION = 0.96;
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max);
+}
+
+/** Widest the panel may be: the viewport, less a margin, and never tiny. */
+function maxPanelW(): number {
+  if (typeof window === "undefined") return MIN_PANEL_W;
+  return Math.max(MIN_PANEL_W, Math.min(window.innerWidth * MAX_PANEL_FRACTION, window.innerWidth - PANEL_MARGIN));
+}
+
+function maxPanelH(): number {
+  if (typeof window === "undefined") return MIN_PANEL_H;
+  return Math.max(MIN_PANEL_H, Math.min(window.innerHeight * MAX_PANEL_FRACTION, window.innerHeight - PANEL_MARGIN));
+}
 
 interface Turn {
   id: string;
@@ -107,6 +135,19 @@ export function StudyMode({ open, onClose }: { open: boolean; onClose: () => voi
   /** Set once the user turns listening on, so a share without audio is visible. */
   const [listen, setListen] = useState(false);
   const [hasAudioTrack, setHasAudioTrack] = useState(false);
+  /**
+   * A photo of the work, for when there is no screen to share. It takes the
+   * stage in place of the live video, so the rest of the panel behaves the
+   * same whether the source is a share or a file.
+   */
+  const [photo, setPhoto] = useState<Attachment | null>(null);
+  const fileRef = useRef<HTMLInputElement | null>(null);
+  /**
+   * The panel's own size once the user has dragged the grip, in px. Null means
+   * "use the stylesheet's default", so the layout is untouched until asked for.
+   */
+  const [size, setSize] = useState<{ w: number; h: number } | null>(null);
+  const drag = useRef<{ x: number; y: number; w: number; h: number } | null>(null);
 
   useEffect(() => {
     busyRef.current = busy;
@@ -162,24 +203,102 @@ export function StudyMode({ open, onClose }: { open: boolean; onClose: () => voi
   }, []);
 
   /**
+   * Adds a photo of the work and answers it. This is the whole point of Study
+   * mode for a student who cannot share a screen: a picture of the worksheet
+   * goes on the stage and is solved the same way a live page is.
+   */
+  const addPhoto = useCallback(
+    async (file: File) => {
+      setError(null);
+      try {
+        const [first] = await readAttachment(file, 0);
+        if (!first || first.kind !== "image") {
+          setError("That file is not an image.");
+          return;
+        }
+        setPhoto(first);
+        const id = `t${idRef.current++}`;
+        const text = DEFAULT_QUESTION;
+        setTurns((prev) => [...prev, { id, question: text, answer: "" }].slice(-MAX_TURNS));
+        setRevealed((prev) => ({ ...prev, [id]: 0 }));
+        stick.current = true;
+        void ask(first, text, id);
+      } catch (err) {
+        setError(err instanceof AttachmentRejected ? err.message : "That image could not be read.");
+      }
+    },
+    [ask],
+  );
+
+  /** Drops the photo and its answers, going back to an empty stage. */
+  const clearPhoto = useCallback(() => {
+    for (const controller of inFlight.current) controller.abort();
+    inFlight.current.clear();
+    setPhoto(null);
+    setTurns([]);
+    setRevealed({});
+    setBusy(false);
+  }, []);
+
+  /**
+   * Resizing by the bottom-right grip.
+   *
+   * The bounds matter more than the drag: a student will pull a corner as far
+   * as it goes, and a panel that can be dragged to zero width or off the screen
+   * is a panel they cannot get back. The width and height are clamped to a
+   * usable range and to the viewport, and the grip is not rendered at all in
+   * the floating window or in full screen, where the size is not the user's.
+   */
+  const startResize = useCallback((event: ReactPointerEvent<HTMLSpanElement>) => {
+    const el = panelRef.current;
+    if (!el) return;
+    event.preventDefault();
+    // Pointer capture keeps the drag alive when the pointer outruns the grip.
+    event.currentTarget.setPointerCapture(event.pointerId);
+    drag.current = { x: event.clientX, y: event.clientY, w: el.offsetWidth, h: el.offsetHeight };
+  }, []);
+
+  const moveResize = useCallback((event: ReactPointerEvent<HTMLSpanElement>) => {
+    const start = drag.current;
+    if (!start) return;
+    // The panel is pinned to the bottom right, so dragging the grip outwards
+    // grows it and dragging inwards shrinks it.
+    const w = clamp(start.w + (event.clientX - start.x), MIN_PANEL_W, maxPanelW());
+    const h = clamp(start.h + (event.clientY - start.y), MIN_PANEL_H, maxPanelH());
+    setSize({ w, h });
+  }, []);
+
+  const endResize = useCallback((event: ReactPointerEvent<HTMLSpanElement>) => {
+    drag.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  }, []);
+
+  /**
    * Grabs a frame and asks about it. `explicit` marks a deliberate read: it runs
    * even while another answer streams, so a typed question is never dropped.
    */
   const scan = useCallback(
     (question?: string, explicit = false) => {
-      const video = videoRef.current;
-      if (!video || !streamRef.current) return;
       const asked = question?.trim() ?? "";
       if (busyRef.current && !explicit) return;
 
-      // A frame that is one flat colour is the black gap before a share paints.
-      // Reading it costs a call and comes back as "there is nothing here", so
-      // it is skipped. A typed question is still honoured, since the user may
-      // be looking at a genuinely dark page.
-      const sig = frameSignature(video);
-      if (!explicit && sig && isBlankSignature(sig)) return;
-
-      const attachment = grabFrame(video, "Screen");
+      // The source is the live screen when one is shared, otherwise a photo the
+      // user added. Either way the rest of the flow is identical.
+      let attachment: Attachment | null = null;
+      const video = videoRef.current;
+      if (streamRef.current && video) {
+        // A frame that is one flat colour is the black gap before a share
+        // paints. Reading it costs a call and comes back as "there is nothing
+        // here", so it is skipped. A typed question is still honoured, since
+        // the user may be looking at a genuinely dark page.
+        const sig = frameSignature(video);
+        if (!explicit && sig && isBlankSignature(sig)) return;
+        attachment = grabFrame(video, "Screen");
+      } else if (photo) {
+        attachment = photo;
+      }
       if (!attachment) return;
 
       const id = `t${idRef.current++}`;
@@ -189,7 +308,7 @@ export function StudyMode({ open, onClose }: { open: boolean; onClose: () => voi
       stick.current = true;
       void ask(attachment, text, id);
     },
-    [ask],
+    [ask, photo],
   );
 
   const stopShare = useCallback(() => {
@@ -416,6 +535,8 @@ export function StudyMode({ open, onClose }: { open: boolean; onClose: () => voi
   if (!open) return null;
 
   const collapsed = minimized && !pipWindow;
+  /** There is something to answer: a live share, or a photo of the work. */
+  const ready = sharing || Boolean(photo);
   const current = turns.length ? turns[turns.length - 1] : null;
   const shownCount = current ? (revealed[current.id] ?? 0) : 0;
   const shown = current ? current.answer.slice(0, shownCount) : "";
@@ -427,8 +548,21 @@ export function StudyMode({ open, onClose }: { open: boolean; onClose: () => voi
       className={`study-panel study-player ${pipWindow ? "study-floating" : ""} ${
         collapsed ? "study-mini" : ""
       }`}
+      style={size && !pipWindow && !isFull ? { width: size.w, height: size.h } : undefined}
       aria-label="Study mode"
     >
+      {!pipWindow && !isFull && !collapsed && (
+        <span
+          className="study-grip"
+          role="separator"
+          aria-label="Resize the panel"
+          title="Drag to resize"
+          onPointerDown={startResize}
+          onPointerMove={moveResize}
+          onPointerUp={endResize}
+          onPointerCancel={endResize}
+        />
+      )}
       <div className="study-head">
         <ScreenIcon className="h-4 w-4 text-ink-700" />
         <span className="text-[0.875rem] font-medium text-ink-900">Study</span>
@@ -475,14 +609,35 @@ export function StudyMode({ open, onClose }: { open: boolean; onClose: () => voi
       {!collapsed && (
         <>
           <div className="study-stage">
-            <video ref={videoRef} playsInline muted aria-hidden />
-            {!sharing && (
+            <video
+              ref={videoRef}
+              playsInline
+              muted
+              aria-hidden
+              className={photo && !sharing ? "hidden" : undefined}
+            />
+            {photo && !sharing && (
+              <>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img className="study-photo" src={photo.dataUrl} alt="The work you added" />
+                <button
+                  type="button"
+                  onClick={clearPhoto}
+                  aria-label="Remove photo"
+                  title="Remove photo"
+                  className="study-photo-clear"
+                >
+                  <XIcon className="h-3.5 w-3.5" />
+                </button>
+              </>
+            )}
+            {!sharing && !photo && (
               <div className="study-stage-idle">
                 <ScreenIcon className="h-5 w-5" />
                 <p>
                   {canCaptureScreen()
-                    ? "Share your screen to begin. Answers play here."
-                    : "Screen sharing is not available in this browser."}
+                    ? "Share your screen, or add a photo of the work."
+                    : "Add a photo of the work to begin."}
                 </p>
                 {canCaptureScreen() && canRecordAudio() && (
                   <label className="study-listen">
@@ -494,15 +649,37 @@ export function StudyMode({ open, onClose }: { open: boolean; onClose: () => voi
                     <span>Also listen to the audio</span>
                   </label>
                 )}
-                <button
-                  type="button"
-                  onClick={() => void beginShare()}
-                  disabled={!canCaptureScreen()}
-                  className="study-btn study-btn-primary"
-                >
-                  <ScreenIcon className="h-4 w-4" />
-                  Share screen
-                </button>
+                <div className="study-stage-actions">
+                  <button
+                    type="button"
+                    onClick={() => void beginShare()}
+                    disabled={!canCaptureScreen()}
+                    className="study-btn study-btn-primary"
+                  >
+                    <ScreenIcon className="h-4 w-4" />
+                    Share screen
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => fileRef.current?.click()}
+                    className="study-btn"
+                  >
+                    <ImageIcon className="h-4 w-4" />
+                    Add photo
+                  </button>
+                </div>
+                <input
+                  ref={fileRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  aria-label="Add a photo of the work"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    e.target.value = "";
+                    if (file) void addPhoto(file);
+                  }}
+                />
               </div>
             )}
             {sharing && (
@@ -525,7 +702,7 @@ export function StudyMode({ open, onClose }: { open: boolean; onClose: () => voi
             )}
           </div>
 
-          {sharing && (
+          {ready && (
             <>
               <div className="study-transport">
                 <button
@@ -566,7 +743,9 @@ export function StudyMode({ open, onClose }: { open: boolean; onClose: () => voi
               <p className="study-caption-empty">
                 {sharing
                   ? "Watching your screen. The answer plays here on its own."
-                  : "Nothing yet. Share a screen and open the assignment."}
+                  : photo
+                    ? "Reading your photo. Ask a follow-up below."
+                    : "Nothing yet. Share a screen or add a photo."}
               </p>
             ) : (
               <>
@@ -590,7 +769,7 @@ export function StudyMode({ open, onClose }: { open: boolean; onClose: () => voi
             )}
           </div>
 
-          {sharing && (
+          {ready && (
             <div className="study-foot">
               {askOpen ? (
                 <div className="study-ask">

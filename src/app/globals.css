@@ -1348,6 +1348,69 @@ input {
   color: var(--ink-700);
 }
 
+/* Two ways in: share the screen, or add a photo of the work. */
+.study-stage-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  justify-content: center;
+}
+
+/* A photo takes the stage exactly like a live frame does. */
+.study-photo {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: var(--ink-200);
+}
+.study-photo-clear {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.6rem;
+  height: 1.6rem;
+  border: 1px solid var(--stroke);
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--ink-1000) 55%, transparent);
+  color: var(--ink-900);
+  cursor: pointer;
+  backdrop-filter: blur(6px);
+  transition: background 0.15s var(--ease-out);
+}
+.study-photo-clear:hover {
+  background: color-mix(in oklab, var(--ink-1000) 75%, transparent);
+}
+
+/*
+ * The resize grip, in the bottom-right corner where the panel's own edge is.
+ * It stays a thin diagonal of lines rather than a filled block, so it reads as
+ * part of the panel's border and not as a button.
+ */
+.study-grip {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  z-index: 5;
+  width: 1.15rem;
+  height: 1.15rem;
+  cursor: nwse-resize;
+  touch-action: none;
+  background: repeating-linear-gradient(
+    135deg,
+    transparent 0 3px,
+    var(--stroke-strong) 3px 4px
+  );
+  opacity: 0.5;
+  transition: opacity 0.15s var(--ease-out);
+}
+.study-grip:hover {
+  opacity: 1;
+}
+
 /* Centered play affordance, like the big button on a video. */
 .study-bigplay {
   position: absolute;
