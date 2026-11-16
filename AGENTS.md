@@ -49,15 +49,27 @@ Two separate credentials, stored in two different places. Do not mix them up.
   read server-side only. This is what makes chat, vision and YouTube work.
   Get one at <https://build.nvidia.com>. `.env.example` holds the placeholder
   shape; never put a real key there or in any other tracked file.
-- **GitHub access** — for pushing this repo. It is *not* a `GITHUB_TOKEN`
-  environment variable. OpenHands brokers it: the account token sits in
-  `~/.openhands/git-credentials/github.token`, and git calls
-  `~/.openhands/git-credential-helper`, which exchanges it for a
-  short-lived installation token via
-  `https://app.all-hands.dev/api/v1/webhooks/secrets`. Git config wires this up
-  as `credential.https://github.com.helper`, so a plain `git push` just works
-  once access is granted. Exporting `GITHUB_TOKEN` does not affect `git push`;
-  only `gh` reads that.
+- **GitHub access** — for pushing this repo. Two paths exist, and only one of
+  them can write. **Use SSH.**
+  - **SSH deploy key (works, use this).** `git@github.com:bluntedknives/Folio.git`,
+    keyed by `/workspace/.secrets/folio_deploy`. `~/.ssh` is on the ephemeral
+    overlay and the ssh client itself is often absent, so after any container
+    reset run `sh /workspace/.secrets/setup-ssh.sh` first (it installs
+    openssh-client, rebuilds `~/.ssh`, and restores the git identity). Verify
+    with `ssh -T git@github.com`, which should greet `bluntedknives/Folio`.
+  - **Brokered HTTPS token (read-only for this repo).** It is *not* a
+    `GITHUB_TOKEN` environment variable. The account token sits in
+    `~/.openhands/git-credentials/github.token`, and git calls
+    `~/.openhands/git-credential-helper`, which exchanges it for a short-lived
+    installation token via `https://app.all-hands.dev/api/v1/webhooks/secrets`.
+    That token authenticates correctly as `bluntedknives` and `git ls-remote`
+    works, so it looks healthy — but it is a GitHub App installation token whose
+    grant does not cover this repo, so **every write fails** with
+    `403 Resource not accessible by integration`. Its `x-oauth-scopes` header is
+    empty, which is the tell. Do not spend time on it; switch the remote to SSH.
+    Exporting `GITHUB_TOKEN` does not affect `git push`; only `gh` reads that.
+  - The remote is kept as SSH with an `origin-https` fallback. If a push 403s,
+    check the remote before assuming the credential is bad: `git remote -v`.
 
 **Persisting a credential across sessions.** Environment variables set in a
 shell do not survive into the next conversation. To make one available every
