@@ -1,5 +1,6 @@
 import type { Attachment } from "./types";
 import { PdfRejected, dataUrlBytes, readPdf, stripExtension } from "./pdf";
+import { VideoRejected, isVideoFile, readVideo } from "./video";
 
 export const MAX_IMAGE_BYTES = 12 * 1024 * 1024;
 export const MAX_AUDIO_BYTES = 24 * 1024 * 1024;
@@ -43,10 +44,17 @@ const AUDIO_TYPES = new Set([
 
 /**
  * Routes one file to the right reader. Images are re-encoded (which is what
- * strips metadata), PDFs are rendered page by page, and audio is embedded as-is.
+ * strips metadata), PDFs are rendered page by page, videos have their container
+ * metadata blanked, and audio is embedded as-is.
  */
 export async function readAttachment(file: File, index: number): Promise<Attachment[]> {
   const type = (file.type || guessType(file.name)).toLowerCase();
+
+  // Checked before the image branch, because some platforms report a video as
+  // `application/octet-stream` or with no type at all.
+  if (isVideoFile(file)) {
+    return [await readVideo(file, index)];
+  }
 
   if (type === "application/pdf" || /\.pdf$/i.test(file.name)) {
     if (file.size > MAX_PDF_BYTES) {
@@ -70,15 +78,28 @@ export async function readAttachment(file: File, index: number): Promise<Attachm
   }
 
   throw new AttachmentRejected(
-    `${file.name || "That file"} is not a format I can read. Use an image, a PDF, or an audio clip.`,
+    `${file.name || "That file"} is not a format I can read. Use an image, a PDF, an audio clip or a video.`,
   );
 }
 
-/** Reads several files, rejecting the whole batch if any one fails. */
+/**
+ * Reads several files, rejecting the whole batch if any one fails. The PDF and
+ * video readers raise their own error types so they can be tested on their own;
+ * they are normalised here so the UI has one thing to catch and the reader's
+ * own wording (which size limit was hit, which format is unsupported) survives.
+ */
 export async function readAttachments(files: File[]): Promise<Attachment[]> {
   const out: Attachment[] = [];
   for (let i = 0; i < files.length; i++) {
-    out.push(...(await readAttachment(files[i], out.length + i)));
+    try {
+      out.push(...(await readAttachment(files[i], out.length + i)));
+    } catch (err) {
+      if (err instanceof AttachmentRejected) throw err;
+      if (err instanceof PdfRejected || err instanceof VideoRejected) {
+        throw new AttachmentRejected(err.message);
+      }
+      throw err;
+    }
   }
   return out;
 }
@@ -249,4 +270,4 @@ export function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-export { PdfRejected };
+export { PdfRejected, VideoRejected };

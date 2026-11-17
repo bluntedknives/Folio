@@ -259,6 +259,16 @@ export function PlayIcon({ className }: IconProps) {
   );
 }
 
+/** Camera body with a lens, for an attached video clip. */
+export function VideoIcon({ className }: IconProps) {
+  return (
+    <svg {...base} className={className}>
+      <rect x="2.75" y="6.5" width="12.5" height="11" rx="2.25" />
+      <path d="m15.25 12.5 5-2.9v4.8l-5-2.9Z" />
+    </svg>
+  );
+}
+
 /** Square with an arrow leaving it, for popping the panel into a floating window. */
 export function PopOutIcon({ className }: IconProps) {
   return (

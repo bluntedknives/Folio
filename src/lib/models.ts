@@ -9,6 +9,14 @@ export type { ModelInfo };
  *
  * There is no picker in the UI: `routeFor` chooses per message. These entries
  * are the catalogue it chooses from.
+ *
+ * The capability flags are measured, not assumed. Only the omni model accepts
+ * an audio part and only omni and the vision model accept a video part; the
+ * other two answer a multimodal request with
+ * "multimodal processing is not enabled", so they are marked false and never
+ * receive one. Audio sent to a model without `audio` is silently ignored
+ * rather than rejected, which is the worst case: the model answers as though
+ * the clip were never attached. `routeFor` is what keeps that from happening.
  */
 export const MODELS: ModelInfo[] = [
   {
@@ -16,16 +24,18 @@ export const MODELS: ModelInfo[] = [
     label: "Lightning",
     blurb: "Fast reasoning model. Great for most homework.",
     vision: false,
-    audio: true,
+    audio: false,
+    video: false,
     reasoning: true,
     tier: "fast",
   },
   {
     id: "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
     label: "Nano",
-    blurb: "Smallest and quickest. Good for short questions.",
-    vision: false,
+    blurb: "Reads video, hears audio and reads photos.",
+    vision: true,
     audio: true,
+    video: true,
     reasoning: true,
     tier: "quick",
   },
@@ -34,7 +44,8 @@ export const MODELS: ModelInfo[] = [
     label: "Ultra",
     blurb: "The strongest model here. Long proofs and hard problems.",
     vision: false,
-    audio: true,
+    audio: false,
+    video: false,
     reasoning: true,
     tier: "deep",
   },
@@ -43,7 +54,8 @@ export const MODELS: ModelInfo[] = [
     label: "Vision",
     blurb: "Reads photos of worksheets, diagrams and handwriting.",
     vision: true,
-    audio: true,
+    audio: false,
+    video: true,
     reasoning: true,
     tier: "vision",
   },
@@ -53,6 +65,11 @@ export const DEFAULT_MODEL_ID = MODELS[0].id;
 export const VISION_MODEL_ID = "nvidia/nemotron-3.5-super-vl-120b-a12b";
 export const QUICK_MODEL_ID = "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning";
 export const DEEP_MODEL_ID = "nvidia/nemotron-3-ultra-550b-a55b";
+/**
+ * The only model that hears audio. Used for any turn carrying an audio clip or
+ * a video, because a video with a soundtrack is heard here and nowhere else.
+ */
+export const MEDIA_MODEL_ID = "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning";
 
 export function getModel(id: string): ModelInfo | undefined {
   return MODELS.find((m) => m.id === id);
@@ -67,19 +84,28 @@ const LONG_PROMPT = 280;
 const HARD_CUES =
   /\b(derive|prove|proof|integrate|integral|differentiat|limit|theorem|optimi[sz]|algorithm|complexity|step[- ]by[- ]step|walk me through|essay|thesis|critique|evaluate the evidence)\b/i;
 
-type Route = "quick" | "fast" | "deep" | "vision";
+type Route = "quick" | "fast" | "deep" | "vision" | "media";
 
 function pickRoute({
   hasImages,
   hasAudio,
+  hasVideo,
   prompt,
 }: {
   hasImages: boolean;
   hasAudio: boolean;
+  hasVideo: boolean;
   prompt: string;
 }): Route {
-  // Anything the model has to look at or listen to goes to the multimodal one.
-  if (hasImages || hasAudio) return "vision";
+  // Anything with sound goes to the one model that hears it. This is checked
+  // before the image case: a clip the model silently ignores is worse than a
+  // slow answer, and only omni accepts audio at all.
+  if (hasAudio) return "media";
+  // A video is looked at and, when it has a soundtrack, listened to. Only omni
+  // does both, and the stills fallback is not a substitute for the motion.
+  if (hasVideo) return "media";
+  // Anything the model has to look at goes to the multimodal one.
+  if (hasImages) return "vision";
   const text = prompt.trim();
   if (text.length > LONG_PROMPT) return "deep";
   if (HARD_CUES.test(text)) return "deep";
@@ -92,6 +118,7 @@ const MODEL_BY_ROUTE: Record<Route, string> = {
   fast: DEFAULT_MODEL_ID,
   deep: DEEP_MODEL_ID,
   vision: VISION_MODEL_ID,
+  media: MEDIA_MODEL_ID,
 };
 
 const LABEL_BY_ROUTE: Record<Route, string> = {
@@ -99,6 +126,7 @@ const LABEL_BY_ROUTE: Record<Route, string> = {
   fast: "Thinking",
   deep: "Working through it",
   vision: "Reading it",
+  media: "Watching it",
 };
 
 /**
@@ -124,20 +152,23 @@ export interface RouteDecision {
 
 /**
  * Picks the model, the working label and whether to reason, in one place.
- * Anything with an image or audio goes to the multimodal model; otherwise a
- * long or multi-step prompt gets the strong model, and a one-liner gets the
- * quickest. Only the strong route is allowed to think out loud.
+ * Anything with sound goes to the one model that hears it; a video also goes
+ * there, since it may carry a soundtrack; an image goes to the vision model;
+ * otherwise a long or multi-step prompt gets the strong model and a one-liner
+ * gets the quickest. Only the strong route is allowed to think out loud.
  */
 export function routeFor({
   hasImages,
   hasAudio,
+  hasVideo = false,
   prompt,
 }: {
   hasImages: boolean;
   hasAudio: boolean;
+  hasVideo?: boolean;
   prompt: string;
 }): RouteDecision {
-  const route = pickRoute({ hasImages, hasAudio, prompt });
+  const route = pickRoute({ hasImages, hasAudio, hasVideo, prompt });
   const model = MODEL_BY_ROUTE[route];
   return {
     model,
@@ -212,7 +243,14 @@ Graphs and diagrams:
 When the student attaches a file:
 - A photo or scanned page is a worksheet: read the questions and answer them.
 - A PDF arrives as page images plus extracted text. Use both.
-- An audio clip is usually a spoken question: transcribe what was asked, then answer it.
+- An audio clip is a spoken question: transcribe what was asked, then answer it.
+- A video is a clip the student recorded or attached. Watch it and answer what is asked.
+
+When a video is attached:
+- You are given the clip itself, so you can see how things move over time, not just stills. Read any on-screen text, equations or working and answer the question in the clip.
+- If the clip has sound, you hear it: a spoken question, a teacher explaining, or a problem read aloud. Transcribe what matters and answer it. If there is no sound track, say nothing about audio and work from what you see.
+- Motion is approximate. You see the clip, but a gesture, a sign or a fast movement may be ambiguous to you. For a sign-language clip, describe the handshapes, movement and position you can see, and give your best reading of it, but say plainly that you may misread signs and that a fluent signer should confirm. Never invent signs, words or sentences you are not confident about.
+- If the clip is too short, too blurry or too dark to read, say so in one line rather than guessing at its content.
 
 When a YouTube video is provided:
 - You have the title, channel, duration, publish date, the description, and a few still frames from the video. You do not have the audio and you do not have a transcript.

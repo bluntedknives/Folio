@@ -269,6 +269,34 @@ HEAD:main`); keep it that way rather than merging, so the two stay identical.
   when the text-based choice cannot see. The check is
   `getModel(...)?.vision` in `src/app/api/chat/route.ts`; without it the image
   parts go to a text-only model and the whole request is rejected.
+- **An attached clip is watched; a YouTube link is only described.** These are
+  two different paths and must not be conflated. A clip the student attaches
+  goes to the API as a `video_url` data URL and the model sees the motion and
+  hears the soundtrack. A YouTube link has no such path (see above). Only the
+  omni and vision models accept a `video_url`; the other two answer a
+  multimodal request with "multimodal processing is not enabled", so
+  `ModelInfo.video` gates it in `src/lib/validation.ts` and `routeFor` picks
+  `media` for any turn with a clip.
+- **The API accepts one video per request and refuses video plus audio.** The
+  client sends one, and `toUpstream` keeps the video on the newest turn that
+  carries one and strips it from older turns, so a chat with two clips does not
+  fail every later turn. A turn that carries its own audio clip drops the video
+  instead, since that turn is about the recording. Both rules are enforced in
+  the route, not just the client, so a crafted request cannot trip them.
+- **Clip metadata is blanked in place, not re-encoded.** `src/lib/video.ts`
+  renames MP4/MOV `udta`/`meta`/`uuid`/`ilst` to `free` and zeroes the payload,
+  and replaces WebM `Tags` and the `Title`/`MuxingApp`/`WritingApp` children of
+  `Info` with same-length `Void` elements. Length is preserved so `stco`/`co64`
+  and `Cues` offsets stay valid and the file still decodes. Do not "clean this
+  up" with a re-encode: browser transcoding was measured and rejected, because
+  MediaRecorder's streaming output (no duration, no cue table) is refused by
+  the API's content screen with a 422.
+- A `video_url` part is a data URL of the whole file, so it is large. The
+  attachment is only written to IndexedDB on send, never on attach, and the
+  cap is 16 MB (`MAX_VIDEO_BYTES`) because base64 adds a third on top. A
+  follow-up question about a clip still sends the clip, so `hasVideo` in the
+  route is read from the messages rather than from the newest-turn flag, and
+  search is skipped for any turn whose conversation carries a clip.
 - The system prompt's length contract is load-bearing. "Be shorter than you
   think you should" did not stop a one-line question getting an essay; naming
   the bands (one-liner, normal, explicit essay) and adding a final

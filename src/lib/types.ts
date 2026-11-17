@@ -1,7 +1,7 @@
 export type Role = "user" | "assistant" | "system";
 
 /** What the attachment actually is, which decides how it is sent and drawn. */
-export type AttachmentKind = "image" | "document" | "audio";
+export type AttachmentKind = "image" | "document" | "audio" | "video";
 
 export interface Attachment {
   kind: AttachmentKind;
@@ -9,16 +9,26 @@ export interface Attachment {
   name: string;
   /**
    * Payload as a data URL. Images are re-encoded so metadata is dropped;
-   * documents and audio are passed through untouched.
+   * videos have their container metadata blanked in place; documents and audio
+   * are passed through untouched.
    */
   dataUrl: string;
-  /** Images only. */
+  /** Images and videos. */
   width?: number;
   height?: number;
   /** Documents only: extracted plain text, so the model knows what is in there. */
   text?: string;
   /** Documents only: how many pages were rendered. */
   pages?: number;
+  /** Videos only: length in seconds, 0 when it could not be read. */
+  duration?: number;
+  /**
+   * Videos only: whether the container declares a sound track. Only the omni
+   * model hears it, so this decides which model the turn goes to.
+   */
+  hasAudio?: boolean;
+  /** Videos only: a single frame as a JPEG data URL, used as the thumbnail. */
+  poster?: string;
   /** Bytes of `dataUrl`. */
   bytes: number;
 }
@@ -94,6 +104,8 @@ export interface ModelInfo {
   vision: boolean;
   /** Accepts recorded audio. */
   audio: boolean;
+  /** Accepts a video clip. */
+  video: boolean;
   reasoning: boolean;
   /** Where this model sits in the auto-routing order. */
   tier: "quick" | "fast" | "deep" | "vision";
@@ -103,7 +115,8 @@ export interface ModelInfo {
 export type WirePart =
   | { type: "text"; text: string }
   | { type: "image_url"; image_url: { url: string } }
-  | { type: "input_audio"; input_audio: { data: string; format: string } };
+  | { type: "input_audio"; input_audio: { data: string; format: string } }
+  | { type: "video_url"; video_url: { url: string } };
 
 /** Wire format sent to the API route. */
 export interface WireMessage {

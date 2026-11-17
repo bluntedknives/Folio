@@ -13,6 +13,36 @@ import { findVideoUrl } from "@/lib/youtube";
 import { findWebLinks } from "@/lib/urls";
 import { AudioIcon, CheckIcon, CopyIcon, FolioMark, RefreshIcon } from "./icons";
 
+/**
+ * An attached video, drawn from its local data URL so nothing is re-fetched.
+ * The player is muted and paused: it is there so the student can confirm they
+ * attached the right clip, not to play it back at them.
+ */
+function VideoAttachment({
+  src,
+  poster,
+  name,
+}: {
+  src: string;
+  poster?: string;
+  name: string;
+}) {
+  return (
+    <div className="overflow-hidden rounded-xl border border-stroke bg-ink-150">
+      <video
+        src={src}
+        poster={poster || undefined}
+        controls
+        muted
+        playsInline
+        preload="metadata"
+        title={name}
+        className="max-h-56 w-full max-w-[22rem] bg-black object-contain"
+      />
+    </div>
+  );
+}
+
 export function MessageBubble({
   message,
   streaming,
@@ -52,7 +82,14 @@ function UserBubble({ message }: { message: ChatMessage }) {
         {message.attachments && message.attachments.length > 0 && (
           <div className="flex flex-wrap justify-end gap-2">
             {message.attachments.map((a, i) =>
-              a.kind === "image" || a.kind === "document" ? (
+              a.kind === "video" ? (
+                <VideoAttachment
+                  key={`${a.name}-${i}`}
+                  src={a.dataUrl}
+                  poster={a.poster}
+                  name={a.name}
+                />
+              ) : a.kind === "image" || a.kind === "document" ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
                   key={`${a.name}-${i}`}

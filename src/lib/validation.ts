@@ -19,6 +19,8 @@ export interface ChatRequestBody {
   hasImages: boolean;
   /** True when the newest turn carries audio. */
   hasAudio: boolean;
+  /** True when the newest turn carries a video. */
+  hasVideo: boolean;
 }
 
 export type ParseResult =
@@ -90,8 +92,9 @@ export async function readChatRequest(request: Request): Promise<ParseResult> {
   const latest = messages[messages.length - 1];
   const hasImages = (latest?.parts ?? []).some((p) => p.type === "image_url");
   const hasAudio = (latest?.parts ?? []).some((p) => p.type === "input_audio");
+  const hasVideo = (latest?.parts ?? []).some((p) => p.type === "video_url");
 
-  return { ok: true, body: { model: model.id, messages, query, videoId, hasImages, hasAudio } };
+  return { ok: true, body: { model: model.id, messages, query, videoId, hasImages, hasAudio, hasVideo } };
 }
 
 type PartsResult = { ok: true; value: WirePart[] } | { ok: false; response: NextResponse };
@@ -161,6 +164,32 @@ function readParts(raw: unknown, model: ModelInfo, isLatest: boolean): PartsResu
         continue;
       }
       out.push({ type: "input_audio", input_audio: { data, format: format.toLowerCase() } });
+      continue;
+    }
+
+    if (part.type === "video_url") {
+      const url = (part.video_url as { url?: unknown } | undefined)?.url;
+      if (typeof url !== "string" || url.length > MAX_PART_CHARS) {
+        return { ok: false, response: fail(413, "That video is too large.") };
+      }
+      if (!/^data:video\/(mp4|quicktime|webm|x-m4v);base64,[A-Za-z0-9+/=]+$/.test(url)) {
+        return { ok: false, response: fail(400, "Videos must be MP4, MOV or WebM data URLs.") };
+      }
+      if (!model.video) {
+        if (isLatest) {
+          return { ok: false, response: fail(400, `${model.label} cannot watch video.`) };
+        }
+        continue;
+      }
+      // The API accepts one video per prompt and rejects the whole request
+      // otherwise, so a second one is dropped here rather than at the wire.
+      if (out.some((p) => p.type === "video_url")) continue;
+      // A video's own soundtrack is heard automatically, and sending a
+      // separate audio part alongside it is rejected outright.
+      for (let i = out.length - 1; i >= 0; i--) {
+        if (out[i].type === "input_audio") out.splice(i, 1);
+      }
+      out.push({ type: "video_url", video_url: { url } });
       continue;
     }
 

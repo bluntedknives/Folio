@@ -37,13 +37,29 @@ export async function POST(request: Request) {
     : latestWebLinks(parsed.body.messages.map((m) => ({ role: m.role, content: m.content })));
   const pages = links.length ? await loadPages(links.map((l) => l.url)) : [];
 
+  // The client reports media on the newest turn only, but a clip carries into
+  // the follow-up turn that asks about it, so presence is read from the
+  // messages that will actually be sent rather than from the newest-turn flags.
+  // Routing and the search gate both depend on this being right: a follow-up
+  // about a clip must not lose the clip, and must not go looking on the web.
+  const latestParts = parsed.body.messages[parsed.body.messages.length - 1]?.parts ?? [];
+  const anyVideo = parsed.body.messages.some((m) =>
+    (m.parts ?? []).some((p) => p.type === "video_url"),
+  );
+  const hasVideo = anyVideo;
+  const hasAudio = latestParts.some((p) => p.type === "input_audio");
+  const hasImages =
+    latestParts.some((p) => p.type === "image_url") || (video?.frames.length ?? 0) > 0;
+
   // Search runs on the server, before the model call, so the results can be
   // folded into the system prompt. A failure here just means no web context.
   // A video question is answered from the video, so search is skipped: the
   // question is usually "what is this" and the open web has nothing to add.
   // A linked page is skipped for the same reason: its own text is the source.
+  // An attached clip is skipped too, for the same reason again: the student is
+  // asking about the clip they handed over, not about its topic.
   let sources: Source[] = [];
-  if (!videoId && pages.length === 0 && parsed.body.query && shouldSearch(parsed.body.query)) {
+  if (!videoId && !anyVideo && pages.length === 0 && parsed.body.query && shouldSearch(parsed.body.query)) {
     sources = await search(parsed.body.query);
   }
 
@@ -79,14 +95,11 @@ export async function POST(request: Request) {
   // A video carries images, and only the multimodal model can see them. The
   // route was chosen from the text alone, so it is corrected here rather than
   // sending an image part to a model that will reject the whole request.
-  const decision = routeFor({
-    hasImages: parsed.body.hasImages || (video?.frames.length ?? 0) > 0,
-    hasAudio: parsed.body.hasAudio,
-    prompt: parsed.body.query,
-  });
+  const decision = routeFor({ hasImages, hasAudio, hasVideo, prompt: parsed.body.query });
   const routed = getModel(parsed.body.model);
-  const canSee = (routed?.vision ?? false) || (video?.frames.length ?? 0) === 0;
-  const model = canSee ? parsed.body.model : decision.model;
+  const canSee = (routed?.vision ?? false) || !hasImages;
+  const canWatch = (routed?.video ?? false) || !hasVideo;
+  const model = canSee && canWatch ? parsed.body.model : decision.model;
 
   const baseUrl = (process.env.NVIDIA_BASE_URL ?? "https://integrate.api.nvidia.com/v1").replace(
     /\/+$/,
@@ -112,6 +125,11 @@ export async function POST(request: Request) {
       // Off for everything but the deep route: it is the single biggest saving
       // in time-to-first-token, and short homework does not need it.
       chat_template_kwargs: { enable_thinking: thinkingFor(model) },
+      // A video's soundtrack is heard by default on the omni model, which is
+      // what lets it answer a question that is spoken rather than written.
+      ...(parsed.body.hasVideo && getModel(model)?.audio
+        ? { mm_processor_kwargs: { use_audio_in_video: true } }
+        : {}),
     }),
     signal: AbortSignal.any([request.signal, AbortSignal.timeout(UPSTREAM_TIMEOUT_MS)]),
   });
@@ -139,6 +157,16 @@ export async function POST(request: Request) {
  * `frames` are appended to the last user turn only: they are what the question
  * is about, and repeating them on every turn would multiply the prompt size
  * for no gain.
+ *
+ * A video is kept only on the newest turn that carries one, and dropped from
+ * every older turn. The API accepts at most one video per request, so a chat
+ * that has had two clips attached would otherwise fail every later turn. The
+ * newest one stays so a follow-up question about the clip just sent still has
+ * it; the older clip's note text stays, so the model still knows it existed.
+ *
+ * Video and audio may not share a request either. Audio is only ever attached
+ * to the newest turn, so when that turn has audio the video is dropped instead:
+ * the student just handed over a recording, and that is the thing to answer.
  */
 function toUpstream(messages: WireMessage[], frames: string[]) {
   let lastUser = -1;
@@ -149,8 +177,23 @@ function toUpstream(messages: WireMessage[], frames: string[]) {
     }
   }
 
+  const latestHasAudio = (messages[lastUser]?.parts ?? []).some((p) => p.type === "input_audio");
+
+  let newestVideo = -1;
+  if (!latestHasAudio) {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if ((messages[i].parts ?? []).some((p) => p.type === "video_url")) {
+        newestVideo = i;
+        break;
+      }
+    }
+  }
+
   return messages.map((m, i) => {
-    const parts: WirePart[] = [...(m.parts ?? [])];
+    let parts: WirePart[] = [...(m.parts ?? [])];
+    if (i !== newestVideo) {
+      parts = parts.filter((p) => p.type !== "video_url");
+    }
     if (frames.length && i === lastUser) {
       for (const url of frames) parts.push({ type: "image_url", image_url: { url } });
     }

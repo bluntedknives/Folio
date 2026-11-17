@@ -2,7 +2,18 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { Attachment } from "@/lib/types";
-import { AudioIcon, DocumentIcon, GlobeIcon, ImageIcon, PlotIcon, SendIcon, StopIcon, XIcon } from "./icons";
+import {
+  AudioIcon,
+  DocumentIcon,
+  GlobeIcon,
+  ImageIcon,
+  PlayIcon,
+  PlotIcon,
+  SendIcon,
+  StopIcon,
+  VideoIcon,
+  XIcon,
+} from "./icons";
 import { findVideoUrl } from "@/lib/youtube";
 import { findWebLinks } from "@/lib/urls";
 import {
@@ -16,7 +27,7 @@ import {
 
 const ACCEPT =
   "image/png,image/jpeg,image/webp,image/gif,image/bmp,image/avif,image/heic,image/heif," +
-  "application/pdf,audio/*";
+  "application/pdf,audio/*,video/mp4,video/quicktime,video/webm,video/x-m4v,.mp4,.m4v,.mov,.webm";
 
 export function Composer({
   disabled,
@@ -241,14 +252,17 @@ export function Composer({
         </div>
 
         <p className="mt-2 text-center text-[0.6875rem] text-ink-500">
-          Paste or drop images, PDFs and audio. Everything stays on this device.
+          Paste or drop images, PDFs, audio and video. Everything stays on this device.
         </p>
       </div>
     </div>
   );
 }
 
-/** One attached file. Images preview; documents and audio get a labelled chip. */
+/**
+ * One attached file. Images preview, videos show their poster frame with a play
+ * badge, and everything else gets a labelled chip.
+ */
 function AttachmentChip({
   attachment,
   onRemove,
@@ -257,24 +271,36 @@ function AttachmentChip({
   onRemove: () => void;
 }) {
   const [broken, setBroken] = useState(false);
-  const showPreview = attachment.kind === "image" && !broken;
+  const isVideo = attachment.kind === "video";
+  const showPreview =
+    (attachment.kind === "image" || (isVideo && attachment.poster)) && !broken;
+  const previewSrc = isVideo ? attachment.poster : attachment.dataUrl;
 
   return (
     <div className="rise group relative flex items-center gap-2.5 overflow-hidden rounded-xl border border-stroke bg-ink-150 py-1.5 pr-8 pl-1.5">
-      {showPreview ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          src={attachment.dataUrl}
-          alt={attachment.name}
-          onError={() => setBroken(true)}
-          className="h-10 w-10 shrink-0 rounded-lg object-cover"
-        />
+      {showPreview && previewSrc ? (
+        <span className="relative shrink-0">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={previewSrc}
+            alt={attachment.name}
+            onError={() => setBroken(true)}
+            className="h-10 w-10 rounded-lg object-cover"
+          />
+          {isVideo && (
+            <span className="pointer-events-none absolute inset-0 flex items-center justify-center rounded-lg bg-black/35">
+              <PlayIcon className="h-3.5 w-3.5 text-white" />
+            </span>
+          )}
+        </span>
       ) : (
         <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-ink-250 text-ink-700">
           {attachment.kind === "audio" ? (
             <AudioIcon className="h-4 w-4" />
           ) : attachment.kind === "document" ? (
             <DocumentIcon className="h-4 w-4" />
+          ) : attachment.kind === "video" ? (
+            <VideoIcon className="h-4 w-4" />
           ) : (
             <ImageIcon className="h-4 w-4" />
           )}
@@ -289,7 +315,9 @@ function AttachmentChip({
           {attachment.kind === "document" && attachment.pages
             ? `${attachment.pages} page${attachment.pages > 1 ? "s" : ""} · `
             : ""}
-          {formatBytes(attachment.bytes)}
+          {isVideo && attachment.duration
+            ? `${formatDuration(attachment.duration)} · ${formatBytes(attachment.bytes)}`
+            : formatBytes(attachment.bytes)}
         </span>
       </span>
 
@@ -303,6 +331,14 @@ function AttachmentChip({
       </button>
     </div>
   );
+}
+
+/** Minutes and seconds, for a clip length. */
+export function formatDuration(seconds: number): string {
+  const total = Math.round(seconds);
+  const minutes = Math.floor(total / 60);
+  const rest = total % 60;
+  return `${minutes}:${String(rest).padStart(2, "0")}`;
 }
 
 function PlusIcon({ className }: { className?: string }) {

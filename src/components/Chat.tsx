@@ -44,6 +44,19 @@ function lastTurnWasMultimodal(messages: ChatMessage[]): boolean {
   return false;
 }
 
+/**
+ * True when the most recent user turn carried a clip. A follow-up about that
+ * clip still needs the model that can watch it, and the same working label.
+ */
+function lastTurnHadVideo(messages: ChatMessage[]): boolean {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role === "user") {
+      return (messages[i].attachments ?? []).some((a) => a.kind === "video");
+    }
+  }
+  return false;
+}
+
 export function Chat() {
   const [hydrated, setHydrated] = useState(false);
   const [conversation, setConversation] = useState<Conversation | null>(null);
@@ -215,9 +228,12 @@ export function Chat() {
 
       // A follow-up question about a photo still needs the photo, so keep the
       // vision model in play for the turn after one too.
-      const hasImages = attachments.length > 0 || lastTurnWasMultimodal(conversation.messages);
+      const hasVideo =
+        attachments.some((a) => a.kind === "video") || lastTurnHadVideo(conversation.messages);
+      const hasImages =
+        attachments.some((a) => a.kind !== "video") || lastTurnWasMultimodal(conversation.messages);
       const hasAudio = attachments.some((a) => a.kind === "audio");
-      const { model, label } = routeFor({ hasImages, hasAudio, prompt: text });
+      const { model, label } = routeFor({ hasImages, hasAudio, hasVideo, prompt: text });
 
       const userMessage: ChatMessage = {
         id: newId(),
@@ -271,9 +287,10 @@ export function Chat() {
 
     const prompt = msgs[lastUser].content;
     const lastAttachments = msgs[lastUser].attachments ?? [];
-    const hasImages = lastAttachments.length > 0;
+    const hasVideo = lastAttachments.some((a) => a.kind === "video");
+    const hasImages = lastAttachments.some((a) => a.kind !== "video");
     const hasAudio = lastAttachments.some((a) => a.kind === "audio");
-    const { model, label } = routeFor({ hasImages, hasAudio, prompt });
+    const { model, label } = routeFor({ hasImages, hasAudio, hasVideo, prompt });
 
     const history = msgs.slice(0, lastUser + 1);
     const assistantId = newId();

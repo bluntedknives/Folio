@@ -84,12 +84,22 @@ function toWire(history: ChatMessage[]): WireMessage[] {
 
 /**
  * Builds the multimodal parts. Images become image parts, audio becomes an
- * input_audio part with the base64 payload split off its data URL, and a
- * document contributes its extracted text plus its rendered pages as images.
+ * input_audio part with the base64 payload split off its data URL, a video
+ * becomes a video_url part carrying the whole data URL, and a document
+ * contributes its extracted text plus its rendered pages as images.
+ *
+ * Two limits are enforced by the API and mirrored here. A request may carry at
+ * most one video, so only the first is sent. A request may not mix a video with
+ * a separate audio part while the video's own soundtrack is being listened to,
+ * so when a video is present the standalone audio is left out rather than
+ * failing the whole turn.
  */
 function toParts(attachments: Attachment[]): WirePart[] {
   const parts: WirePart[] = [];
   const notes: string[] = [];
+
+  const video = attachments.find((a) => a.kind === "video");
+  const videos = attachments.filter((a) => a.kind === "video");
 
   for (const a of attachments) {
     if (a.kind === "image") {
@@ -108,7 +118,22 @@ function toParts(attachments: Attachment[]): WirePart[] {
       continue;
     }
 
+    if (a.kind === "video") {
+      if (a !== video) continue;
+      parts.push({ type: "video_url", video_url: { url: a.dataUrl } });
+      const seconds = a.duration ? ` (${a.duration.toFixed(0)}s)` : "";
+      const sound = a.hasAudio ? " with sound" : " (no sound track)";
+      notes.push(`Attached video clip: ${a.name}${seconds}${sound}.`);
+      if (videos.length > 1) {
+        notes.push(`Only ${a.name} was sent; one video per message.`);
+      }
+      continue;
+    }
+
     if (a.kind === "audio") {
+      // The video's own soundtrack is heard instead, and sending both is
+      // rejected outright.
+      if (video) continue;
       const { format, data } = splitAudioDataUrl(a.dataUrl);
       if (data) {
         parts.push({ type: "input_audio", input_audio: { data, format } });
