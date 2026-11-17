@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useState, type ReactNode } from "react";
+import { createContext, memo, useContext, useState, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
@@ -9,7 +9,9 @@ import rehypeHighlight from "rehype-highlight";
 import { CheckIcon, CopyIcon } from "./icons";
 import { CiteChip } from "./CiteChip";
 import { Graph } from "./graph/Graph";
+import { Deck } from "./slides/Deck";
 import { parseGraphSpec } from "@/lib/graph/spec";
+import { parseDeck } from "@/lib/slides/spec";
 import { normalizeUrl } from "@/lib/domain";
 import type { Source } from "@/lib/types";
 
@@ -28,26 +30,33 @@ export const Markdown = memo(function Markdown({
   children,
   variant = "answer",
   sources,
+  onAsk,
 }: {
   children: string;
   variant?: "answer" | "think";
   sources?: Source[];
+  /** Sends a follow-up from inside a rendered block, e.g. a deck's edit request. */
+  onAsk?: (text: string) => void;
 }) {
   const byUrl = sources?.length ? sourceIndex(sources) : null;
-  const components = byUrl
-    ? { pre: CodeBlock, a: citationLink(byUrl, sources!), code: inlineCitation(sources!) }
-    : { pre: CodeBlock, a: ExternalLink };
+  const components = {
+    pre: PreBlock,
+    a: byUrl ? citationLink(byUrl, sources!) : ExternalLink,
+    ...(byUrl ? { code: inlineCitation(sources!) } : {}),
+  };
 
   return (
-    <div className={variant === "think" ? "md md-think" : "md"}>
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkMath]}
-        rehypePlugins={[rehypeKatex, [rehypeHighlight, { detect: true, ignoreMissing: true }]]}
-        components={components}
-      >
-        {byUrl ? withCitationMarkers(normalizeMath(children)) : normalizeMath(children)}
-      </ReactMarkdown>
-    </div>
+    <AskContext.Provider value={onAsk}>
+      <div className={variant === "think" ? "md md-think" : "md"}>
+        <ReactMarkdown
+          remarkPlugins={[remarkGfm, remarkMath]}
+          rehypePlugins={[rehypeKatex, [rehypeHighlight, { detect: true, ignoreMissing: true }]]}
+          components={components}
+        >
+          {byUrl ? withCitationMarkers(normalizeMath(children)) : normalizeMath(children)}
+        </ReactMarkdown>
+      </div>
+    </AskContext.Provider>
   );
 });
 
@@ -137,30 +146,53 @@ function normalizeMath(source: string): string {
 }
 
 /**
- * Fenced blocks. A ```graph fence becomes a live plot; everything else keeps
- * the language tag and a copy button.
+ * Fenced blocks. A ```graph fence becomes a live plot and a ```slides fence
+ * becomes a deck; everything else keeps the language tag and a copy button.
  */
 const GRAPH_LANGS = new Set(["graph", "plot", "chart"]);
+const DECK_LANGS = new Set(["slides", "deck", "presentation", "slide"]);
 
-function CodeBlock({ children }: { children?: ReactNode }) {
+/**
+ * The chat's follow-up sender, shared with rendered blocks. It travels by
+ * context rather than by prop because the `pre` renderer must be a stable
+ * module-level component: React remounts a subtree whose component type changes,
+ * so a handler baked into a per-render closure would reset a deck on every
+ * keystroke in the composer.
+ */
+const AskContext = createContext<((text: string) => void) | undefined>(undefined);
+
+function PreBlock({ children }: { children?: ReactNode }) {
+  return <CodeBlockBody onAsk={useContext(AskContext)}>{children}</CodeBlockBody>;
+}
+
+/**
+ * The fence renderer. A module-level component, not one built inside the
+ * `Markdown` render, so the identity of the element type never changes.
+ */
+function CodeBlockBody({ children, onAsk }: { children?: ReactNode; onAsk?: (text: string) => void }) {
   const language = languageOf(children);
   const code = extractCode(children);
 
   if (language && GRAPH_LANGS.has(language)) return <Graph source={code} />;
+  if (language && DECK_LANGS.has(language)) return <Deck source={code} onAsk={onAsk} />;
 
-  // Models sometimes nest the graph fence inside a plain fence, or glue the
-  // language token to the body. Find it rather than dumping the spec as code.
-  const nested = unwrapFence(code);
-  if (nested) return <Graph source={nested.body} />;
+  // Models sometimes nest the fence inside a plain fence, or glue the language
+  // token to the body. Find it rather than dumping the spec as code.
+  const nestedGraph = unwrapFence(code, GRAPH_LANGS);
+  if (nestedGraph) return <Graph source={nestedGraph} />;
+  const nestedDeck = unwrapFence(code, DECK_LANGS);
+  if (nestedDeck) return <Deck source={nestedDeck} onAsk={onAsk} />;
 
   // A common failure is the model putting the tag on its own line:
   //   ```
-  //   graph
-  //   title: ...
+  //   slides
+  //   # Title
   //   ```
-  // which parses as an unlabelled block. Draw it when the body really is a spec.
-  const tagless = detectTaglessSpec(code);
-  if (tagless) return <Graph source={tagless} />;
+  // which parses as an unlabelled block. Render it when the body really parses.
+  const taglessGraph = detectTaglessSpec(code, GRAPH_LANGS, (body) => parseGraphSpec(body).ok);
+  if (taglessGraph) return <Graph source={taglessGraph} />;
+  const taglessDeck = detectTaglessSpec(code, DECK_LANGS, looksLikeDeck);
+  if (taglessDeck) return <Deck source={taglessDeck} onAsk={onAsk} />;
 
   return (
     <CodeShell language={language} code={code}>
@@ -170,34 +202,50 @@ function CodeBlock({ children }: { children?: ReactNode }) {
 }
 
 /**
- * Recovers a graph spec from an unlabelled fence whose first line is the tag.
- * Requires the body to actually parse, so an ordinary code snippet that happens
- * to start with the word "graph" is left alone.
+ * True when a body really is a deck, not a code snippet that happens to start
+ * with the word "slides". Requires a parse and at least two slides, since a
+ * deck worth rendering is never one slide, and a one-line snippet that starts
+ * with the tag must stay code.
  */
-function detectTaglessSpec(source: string): string | null {
-  const lines = source.trim().split("\n");
-  if (lines.length < 2) return null;
-  if (!GRAPH_LANGS.has(lines[0].trim().toLowerCase())) return null;
-
-  const body = lines.slice(1).join("\n").trim();
-  if (!body) return null;
-  return parseGraphSpec(body).ok ? body : null;
+function looksLikeDeck(body: string): boolean {
+  const parsed = parseDeck(body);
+  return parsed.ok && parsed.deck.slides.length >= 2;
 }
 
 /**
- * Finds a graph fence anywhere in the text, even when a model has glued the
- * language token to the body ("```graphtitle: ...") or nested the fence inside
- * another one. Bounded work; returns null when there is nothing to draw.
+ * Recovers a spec from an unlabelled fence whose first line is the tag.
+ * Requires the body to actually parse, so an ordinary code snippet that happens
+ * to start with the word "graph" is left alone.
  */
-function unwrapFence(source: string): { body: string } | null {
+function detectTaglessSpec(
+  source: string,
+  langs: Set<string>,
+  parses: (body: string) => boolean,
+): string | null {
+  const lines = source.trim().split("\n");
+  if (lines.length < 2) return null;
+  if (!langs.has(lines[0].trim().toLowerCase())) return null;
+
+  const body = lines.slice(1).join("\n").trim();
+  if (!body) return null;
+  return parses(body) ? body : null;
+}
+
+/**
+ * Finds a fence of one of `langs` anywhere in the text, even when a model has
+ * glued the language token to the body ("```slidestitle: ...") or nested the
+ * fence inside another one. Bounded work; returns null when there is nothing.
+ */
+function unwrapFence(source: string, langs: Set<string>): string | null {
   const text = source.trim();
-  const open = /(?:`{3,}|~{3,})[ \t]*(graph|plot|chart)/i.exec(text);
+  const names = [...langs].join("|");
+  const open = new RegExp(`(?:\`{3,}|~{3,})[ \\t]*(${names})`, "i").exec(text);
   if (!open) return null;
 
   const after = text.slice(open.index + open[0].length);
   const close = /(?:`{3,}|~{3,})[ \t]*$/.exec(after);
   const body = (close ? after.slice(0, close.index) : after).trim();
-  return body ? { body } : null;
+  return body ? body : null;
 }
 
 function CodeShell({

@@ -183,6 +183,26 @@ HEAD:main`); keep it that way rather than merging, so the two stay identical.
   `toUpstream` the question is unshifted as its own text part even when the
   attachment notes already added one, so the model never sees an image with no
   question attached.
+- Decks reuse the `graph` fence pattern. `src/lib/slides/spec.ts` parses a
+  ```slides block (a forgiving line language, not JSON), `Deck.tsx` renders it
+  with an editor, a presenter and exports, and `SlideView.tsx` draws one slide
+  for both the canvas and the thumbnails. The `slides`/`deck` tags are matched
+  the same three ways as `graph` in `Markdown.tsx`.
+- Deck themes are fixed palettes set on `data-theme` and resolved to `--d-*`
+  variables in `globals.css`. They are deliberately not app tokens: a slide is
+  exported and projected, so its colours must not follow the reader's theme.
+  The same five palettes are duplicated in `src/lib/slides/export.ts` for the
+  PPTX and HTML exports, because those files have no CSS variables.
+- Deck export is entirely client-side. PDF goes through the browser's print
+  dialog (`printDeck`), HTML is one self-contained file, and PPTX is a real
+  Office package built by a from-scratch ZIP writer in `export.ts` — text is
+  written as editable text boxes, so it opens in PowerPoint, Keynote and Google
+  Slides. There is no Office or ZIP dependency.
+- The `pre` renderer in `Markdown.tsx` must stay a module-level component
+  (`PreBlock`). React remounts a subtree whose element type changes identity, so
+  a `pre` built inside the `Markdown` render would reset a deck's edits on every
+  parent re-render. The deck's follow-up handler therefore travels through
+  `AskContext` rather than a prop.
 - Study mode (`StudyMode.tsx`) captures the screen with `getDisplayMedia` and
   floats the panel using Document Picture-in-Picture, which is what keeps it
   visible over another tab or app. The panel is rendered with `createPortal`

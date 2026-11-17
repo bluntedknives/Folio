@@ -335,3 +335,74 @@ export function ChevronDownIcon({ className }: IconProps) {
     </svg>
   );
 }
+
+/** A presentation frame with a stand: the slideshow affordance. */
+export function SlidesIcon({ className }: IconProps) {
+  return (
+    <svg {...base} className={className}>
+      <rect x="3" y="4" width="18" height="12" rx="1.6" />
+      <path d="M12 16v3M8.5 21h7" />
+      <path d="M8 9.5h5M8 12h3" />
+    </svg>
+  );
+}
+
+/** Two arrows chasing each other, for regenerate. Already drawn above; this is
+ *  the presentation one used in the deck toolbar. */
+export function PlayDeckIcon({ className }: IconProps) {
+  return (
+    <svg {...base} className={className}>
+      <path d="M7 4.8v14.4a.6.6 0 0 0 .93.5l10.6-7.2a.6.6 0 0 0 0-1L7.93 4.3A.6.6 0 0 0 7 4.8Z" />
+    </svg>
+  );
+}
+
+/** Chevron pointing left, for the previous slide. */
+export function ChevronLeftIcon({ className }: IconProps) {
+  return (
+    <svg {...base} className={className}>
+      <path d="m14 6-6 6 6 6" />
+    </svg>
+  );
+}
+
+/** Chevron pointing right, for the next slide. */
+export function ChevronRightIcon({ className }: IconProps) {
+  return (
+    <svg {...base} className={className}>
+      <path d="m10 6 6 6-6 6" />
+    </svg>
+  );
+}
+
+/** A printer, for print / save as PDF. */
+export function PrinterIcon({ className }: IconProps) {
+  return (
+    <svg {...base} className={className}>
+      <path d="M7 8V4h10v4M7 18H5a1 1 0 0 1-1-1v-5a1 1 0 0 1 1-1h14a1 1 0 0 1 1 1v5a1 1 0 0 1-1 1h-2" />
+      <rect x="7" y="14" width="10" height="6" rx="1" />
+    </svg>
+  );
+}
+
+/** A grid of squares, for the slide thumbnails toggle. */
+export function GridIcon({ className }: IconProps) {
+  return (
+    <svg {...base} className={className}>
+      <rect x="4" y="4" width="7" height="7" rx="1.2" />
+      <rect x="13" y="4" width="7" height="7" rx="1.2" />
+      <rect x="4" y="13" width="7" height="7" rx="1.2" />
+      <rect x="13" y="13" width="7" height="7" rx="1.2" />
+    </svg>
+  );
+}
+
+/** A pencil, for editing a slide. */
+export function PencilIcon({ className }: IconProps) {
+  return (
+    <svg {...base} className={className}>
+      <path d="M4 20h4L19 9a2.1 2.1 0 0 0-3-3L5 17v3Z" />
+      <path d="m15 6 3 3" />
+    </svg>
+  );
+}

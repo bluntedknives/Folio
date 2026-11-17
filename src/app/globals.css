@@ -1890,3 +1890,572 @@ input {
 .study-panel.study-mini .study-caption {
   min-height: 0;
 }
+
+/* ---------- slides ---------- */
+
+/* A deck card in the chat. The chrome is dark in both app themes because the
+   card is a presentation surface, not a document: it should read the same in
+   front of a class whatever the student's theme is. */
+.deck-shell {
+  margin: 1em 0;
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius);
+  background: var(--ink-050);
+  overflow: hidden;
+}
+.deck-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.6rem 0.5rem 0.8rem;
+  background: var(--ink-100);
+  border-bottom: 1px solid var(--stroke);
+}
+.deck-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--ink-900);
+}
+.deck-count {
+  flex-shrink: 0;
+  font-size: 0.6875rem;
+  color: var(--ink-500);
+}
+.deck-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  margin-left: auto;
+}
+.deck-error {
+  padding: 0.6rem 0.8rem;
+  font-size: 0.8125rem;
+  color: var(--ink-600);
+}
+
+.deck-btn {
+  display: inline-flex;
+  height: 1.75rem;
+  align-items: center;
+  gap: 0.3rem;
+  border-radius: 7px;
+  border: 1px solid transparent;
+  padding: 0 0.5rem;
+  font-size: 0.6875rem;
+  font-weight: 500;
+  color: var(--ink-600);
+  transition: color 0.16s var(--ease-out), background-color 0.16s var(--ease-out),
+    border-color 0.16s var(--ease-out);
+}
+.deck-btn:hover:not(:disabled) {
+  background: var(--ink-200);
+  color: var(--ink-900);
+}
+.deck-btn:disabled {
+  opacity: 0.32;
+}
+.deck-btn-icon {
+  width: 1.75rem;
+  justify-content: center;
+  padding: 0;
+}
+.deck-btn-on {
+  background: var(--ink-200);
+  color: var(--ink-900);
+}
+.deck-btn-primary {
+  border-color: var(--stroke-strong);
+  color: var(--ink-900);
+}
+.deck-btn-primary:hover:not(:disabled) {
+  background: var(--solid-bg);
+  color: var(--solid-fg);
+  border-color: var(--solid-bg);
+}
+.deck-btn-danger:hover:not(:disabled) {
+  color: var(--danger);
+}
+@media (max-width: 640px) {
+  .deck-btn-label {
+    display: none;
+  }
+  .deck-btn {
+    width: 1.75rem;
+    justify-content: center;
+    padding: 0;
+  }
+}
+
+.deck-body {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+}
+@media (min-width: 768px) {
+  .deck-body {
+    flex-direction: row;
+  }
+}
+
+/* The thumbnail rail. Scrolls on its own so a long deck never grows the card. */
+.deck-rail {
+  display: flex;
+  gap: 0.4rem;
+  padding: 0.6rem;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--stroke);
+}
+@media (min-width: 768px) {
+  .deck-rail {
+    width: 8.5rem;
+    flex-shrink: 0;
+    flex-direction: column;
+    overflow-x: hidden;
+    overflow-y: auto;
+    max-height: 26rem;
+    border-bottom: 0;
+    border-right: 1px solid var(--stroke);
+  }
+}
+.deck-rail > li {
+  flex-shrink: 0;
+  list-style: none;
+}
+@media (min-width: 768px) {
+  .deck-rail > li {
+    width: 100%;
+  }
+}
+.deck-thumb {
+  position: relative;
+  display: block;
+  width: 6.5rem;
+  overflow: hidden;
+  border-radius: 8px;
+  border: 1px solid var(--stroke);
+  background: var(--ink-100);
+  text-align: left;
+  transition: border-color 0.16s var(--ease-out), transform 0.16s var(--ease-out);
+}
+@media (min-width: 768px) {
+  .deck-thumb {
+    width: 100%;
+  }
+}
+.deck-thumb:hover {
+  border-color: var(--stroke-strong);
+  transform: translateY(-1px);
+}
+.deck-thumb-on {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent-glow);
+}
+.deck-thumb-index {
+  position: absolute;
+  left: 0.3rem;
+  top: 0.25rem;
+  z-index: 2;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.55);
+  padding: 0 0.28rem;
+  font-size: 0.5625rem;
+  font-variant-numeric: tabular-nums;
+  color: #fff;
+}
+.deck-thumb-view {
+  display: block;
+  pointer-events: none;
+}
+
+.deck-main {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+}
+.deck-stage {
+  padding: 0.9rem;
+}
+.deck-transport {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0 0.6rem 0.6rem;
+}
+.deck-pos {
+  padding: 0 0.3rem;
+  font-size: 0.6875rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-500);
+}
+.deck-transport-gap {
+  flex: 1;
+}
+.deck-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0 0.9rem 0.85rem;
+}
+.deck-theme {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.deck-theme-label,
+.deck-label {
+  font-size: 0.625rem;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-500);
+}
+.deck-notes {
+  min-width: 0;
+  flex: 1;
+  font-size: 0.6875rem;
+  color: var(--ink-500);
+}
+.deck-ask {
+  font-size: 0.6875rem;
+  color: var(--accent);
+  transition: opacity 0.16s;
+}
+.deck-ask:hover {
+  opacity: 0.75;
+}
+
+/* ---------- slide editor ---------- */
+
+.deck-editor {
+  display: grid;
+  gap: 0.7rem;
+  padding: 0.2rem 0.9rem 0.9rem;
+  border-top: 1px solid var(--stroke);
+}
+@media (min-width: 640px) {
+  .deck-editor {
+    grid-template-columns: 1fr 1fr;
+  }
+  .deck-editor > .deck-field:nth-child(4),
+  .deck-editor > .deck-field:nth-child(5) {
+    grid-column: 1 / -1;
+  }
+}
+.deck-field {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+.deck-input,
+.deck-textarea,
+.deck-select {
+  width: 100%;
+  border-radius: 8px;
+  border: 1px solid var(--stroke);
+  background: var(--ink-100);
+  padding: 0.4rem 0.55rem;
+  font-size: 0.8125rem;
+  color: var(--ink-900);
+  transition: border-color 0.16s var(--ease-out);
+}
+.deck-input:focus,
+.deck-textarea:focus,
+.deck-select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.deck-textarea {
+  resize: vertical;
+  line-height: 1.5;
+}
+.deck-select {
+  cursor: pointer;
+}
+.deck-select-block {
+  width: 100%;
+}
+.deck-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-top: 0.35rem;
+  font-size: 0.6875rem;
+  color: var(--ink-600);
+}
+.deck-label {
+  display: block;
+  margin-bottom: 0.3rem;
+}
+
+/* ---------- the slide itself ---------- */
+
+/* Five deck themes, each a fixed palette rather than an app token. A slide is
+   exported and projected, so its colours must not depend on the reader's app
+   theme. The variables below are the only place a deck theme is defined. */
+.deck-slide {
+  --d-bg: #111318;
+  --d-fg: #f2f4f6;
+  --d-muted: #9aa2ab;
+  --d-accent: #2dd4bf;
+  --d-panel: #1b1e24;
+  position: relative;
+  aspect-ratio: 16 / 9;
+  width: 100%;
+  overflow: hidden;
+  border-radius: 10px;
+  background: var(--d-bg);
+  color: var(--d-fg);
+  container-type: inline-size;
+}
+.deck-slide[data-theme="paper"] {
+  --d-bg: #f7f8f8;
+  --d-fg: #14181c;
+  --d-muted: #5f676f;
+  --d-accent: #0f9b8e;
+  --d-panel: #ffffff;
+}
+.deck-slide[data-theme="contrast"] {
+  --d-bg: #050607;
+  --d-fg: #ffffff;
+  --d-muted: #c4cad1;
+  --d-accent: #f0a35e;
+  --d-panel: #17191c;
+}
+.deck-slide[data-theme="dusk"] {
+  --d-bg: #1a1626;
+  --d-fg: #f4f1ff;
+  --d-muted: #b3a8d4;
+  --d-accent: #a78bfa;
+  --d-panel: #241f38;
+}
+.deck-slide[data-theme="mint"] {
+  --d-bg: #0b1f1c;
+  --d-fg: #eafff9;
+  --d-muted: #8fc9bd;
+  --d-accent: #5fbf6f;
+  --d-panel: #12302b;
+}
+.deck-slide-inner {
+  display: flex;
+  height: 100%;
+  flex-direction: column;
+  justify-content: center;
+  padding: 7cqw 8cqw;
+}
+.deck-h {
+  margin: 0 0 1.6cqw;
+  font-size: 5.2cqw;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+}
+.deck-sub {
+  margin: 0 0 2.4cqw;
+  font-size: 2.2cqw;
+  font-weight: 500;
+  color: var(--d-accent);
+}
+.deck-content {
+  min-width: 0;
+}
+.deck-content p {
+  margin: 0 0 1.6cqw;
+  max-width: 46ch;
+  font-size: 2.3cqw;
+  line-height: 1.55;
+}
+.deck-list {
+  margin: 0.4cqw 0 0;
+  padding-left: 3cqw;
+}
+.deck-list li {
+  margin: 0.9cqw 0;
+  font-size: 2.3cqw;
+  line-height: 1.5;
+}
+.deck-list li::marker {
+  color: var(--d-accent);
+}
+.deck-quote {
+  margin: 1cqw 0 0;
+  border-left: 0.5cqw solid var(--d-accent);
+  padding-left: 2.4cqw;
+  font-size: 3.4cqw;
+  font-style: italic;
+}
+.deck-code {
+  margin: 1cqw 0 0;
+  overflow: hidden;
+  border-radius: 1.4cqw;
+  background: var(--d-panel);
+  padding: 2.2cqw 2.6cqw;
+  font-family: var(--font-mono);
+  font-size: 1.9cqw;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+.deck-img {
+  margin-top: 1.6cqw;
+  max-height: 44cqh;
+  border-radius: 1.4cqw;
+  object-fit: contain;
+}
+.deck-footer {
+  position: absolute;
+  left: 8cqw;
+  bottom: 3.5cqw;
+  font-size: 1.4cqw;
+  color: var(--d-muted);
+}
+
+.deck-slide.layout-title {
+  text-align: center;
+}
+.deck-slide.layout-title .deck-slide-inner {
+  align-items: center;
+}
+.deck-slide.layout-title .deck-h {
+  font-size: 6.6cqw;
+}
+.deck-slide.layout-title .deck-content p {
+  margin-inline: auto;
+  font-size: 2.5cqw;
+  color: var(--d-muted);
+}
+.deck-slide.layout-section .deck-h {
+  font-size: 6cqw;
+  color: var(--d-accent);
+}
+.deck-slide.layout-quote .deck-slide-inner {
+  justify-content: center;
+}
+.deck-slide.layout-quote .deck-quote {
+  border: 0;
+  padding: 0;
+  font-size: 4.4cqw;
+}
+.deck-slide.layout-quote .deck-h {
+  font-size: 3cqw;
+  color: var(--d-muted);
+}
+
+/* Thumbnails reuse the same markup at a fraction of the size, so a change to a
+   slide's look never has to be made twice. */
+.deck-slide.variant-thumb {
+  border-radius: 6px;
+}
+.deck-slide.variant-thumb .deck-slide-inner {
+  padding: 6cqw 7cqw;
+}
+.deck-slide.variant-thumb .deck-h {
+  font-size: 5.6cqw;
+  margin-bottom: 1.4cqw;
+}
+.deck-slide.variant-thumb .deck-sub,
+.deck-slide.variant-thumb .deck-content p,
+.deck-slide.variant-thumb .deck-list li {
+  font-size: 2.5cqw;
+}
+.deck-slide.variant-thumb .deck-footer {
+  display: none;
+}
+
+/* ---------- presenting ---------- */
+
+.deck-present {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #050607;
+  cursor: pointer;
+}
+.deck-present-stage {
+  width: min(100vw, calc(100vh * 16 / 9));
+  max-height: 100vh;
+}
+.deck-present-stage .deck-slide {
+  border-radius: 0;
+  height: min(100vh, calc(100vw * 9 / 16));
+  aspect-ratio: auto;
+}
+.deck-present-bar {
+  position: fixed;
+  left: 50%;
+  bottom: 1.5rem;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  transform: translateX(-50%);
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(20, 22, 26, 0.86);
+  padding: 0.3rem 0.4rem;
+  backdrop-filter: blur(12px);
+  opacity: 0;
+  transition: opacity 0.3s var(--ease-out), transform 0.3s var(--ease-out);
+  pointer-events: none;
+}
+.deck-present-bar.is-on {
+  opacity: 1;
+  pointer-events: auto;
+}
+.deck-present-btn {
+  display: flex;
+  height: 1.9rem;
+  width: 1.9rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  color: #ccd2d8;
+  transition: background-color 0.16s, color 0.16s;
+}
+.deck-present-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+}
+.deck-present-btn:disabled {
+  opacity: 0.3;
+}
+.deck-present-pos {
+  padding: 0 0.4rem;
+  font-size: 0.6875rem;
+  font-variant-numeric: tabular-nums;
+  color: #9aa2ab;
+}
+.deck-present-gap {
+  width: 0.3rem;
+}
+.deck-present-notes {
+  position: fixed;
+  left: 50%;
+  bottom: 5rem;
+  max-width: min(46rem, 90vw);
+  transform: translateX(-50%);
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(20, 22, 26, 0.86);
+  padding: 0.6rem 0.9rem;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  color: #ccd2d8;
+  backdrop-filter: blur(12px);
+}
+.deck-present-hint {
+  position: fixed;
+  right: 1.25rem;
+  bottom: 1.6rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.6875rem;
+  color: #565d65;
+}

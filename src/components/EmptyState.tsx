@@ -16,6 +16,10 @@ const STARTERS = [
     title: "Check my answer",
     body: "Here is my attempt. Find the mistake and tell me what to fix.",
   },
+  {
+    title: "Make a presentation",
+    body: "Create an 8-slide presentation on the causes of World War I, with speaker notes.",
+  },
 ];
 
 export function EmptyState({
@@ -33,12 +37,12 @@ export function EmptyState({
           {BRAND.tagline}
         </h2>
         <p className="mt-2 max-w-sm text-[0.875rem] leading-relaxed text-ink-500">
-          Paste a question, drop a photo, a PDF or a voice note, or link a YouTube video. The right
-          model is picked for you.
+          Paste a question, drop a photo, a PDF or a voice note, or link a YouTube video. Ask for a
+          slideshow and get an editable deck you can present or export.
         </p>
       </div>
 
-      <div className="mt-8 grid w-full gap-2 sm:grid-cols-3">
+      <div className="mt-8 grid w-full gap-2 sm:grid-cols-2">
         {STARTERS.map((s, i) => (
           <button
             key={s.title}
@@ -58,7 +62,7 @@ export function EmptyState({
       <button
         type="button"
         onClick={onOpenPlotter}
-        style={{ animationDelay: "260ms" }}
+        style={{ animationDelay: "320ms" }}
         className="rise mt-2 flex w-full items-center gap-3 rounded-2xl border border-stroke bg-ink-100 p-3.5 text-left transition-colors hover:bg-ink-150"
       >
         <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-ink-150 text-ink-700">

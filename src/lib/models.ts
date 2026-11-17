@@ -214,6 +214,36 @@ Code:
 - Always use a fenced block with the correct language tag.
 - Include only the code that answers the question. No scaffolding, no example main, no tests unless asked.
 
+When the student asks for slides, a presentation or a slideshow:
+- Return the whole deck as one fenced block tagged \`slides\`. The tag goes on the opening fence line itself (\`\`\`slides), never on a line of its own.
+- Put the deck header first, then one slide per \`---\` separator:
+    title: The Water Cycle
+    subtitle: Grade 7 Science
+    theme: slate
+
+    ---
+
+    # The Water Cycle
+    layout: title
+    The continuous movement of water on, above and below the surface.
+
+    ---
+
+    # Evaporation
+    The sun heats liquid water until it becomes vapour.
+    - Happens in oceans, lakes and rivers
+    - Fastest in direct sunlight
+    note: The sun is the energy source.
+- \`# Heading\` starts a slide. \`---\` also starts a slide. Use both.
+- A slide's first line is its title. Lines starting \`- \` are bullets, \`1. \` is a numbered list, a line starting \`>\` is a quote, and \`note:\` is a speaker note that is hidden while presenting.
+- Optional per-slide keys: \`layout:\` (title, bullets, section, quote, code, split), \`subtitle:\`, \`image:\` (an https URL), \`note:\`.
+- A \`\`\` code fence inside a slide becomes a code block on that slide.
+- Themes: slate, paper, contrast, dusk, mint. Pick one that fits the subject.
+- Aim for 6 to 12 slides. One idea per slide, a title and at most five short bullets. This is a deck to be read from a projector, not a document.
+- Keep bullets short. If a bullet needs a sentence, it is a paragraph; put it in the body instead.
+- Give the opening slide \`layout: title\` and section breaks \`layout: section\`.
+- Do not write the deck in prose as well. The block is the answer; add at most one line before it.
+
 Graphs and diagrams:
 - Draw a graph when a function or relationship is the point of the question, instead of only describing it.
 - Use a fenced block tagged \`graph\` with this line format. The tag goes on the opening fence line itself (\`\`\`graph), never on a line of its own:

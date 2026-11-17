@@ -453,6 +453,7 @@ export function Chat() {
                   message={m}
                   streaming={streaming && i === messages.length - 1}
                   workingLabel={streaming && i === messages.length - 1 ? working : undefined}
+                  onAsk={(text) => void send(text, [])}
                   onRegenerate={
                     canRegenerate && i === messages.length - 1
                       ? () => void regenerate()

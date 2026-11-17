@@ -48,11 +48,13 @@ export function MessageBubble({
   streaming,
   workingLabel,
   onRegenerate,
+  onAsk,
 }: {
   message: ChatMessage;
   streaming: boolean;
   workingLabel?: string;
   onRegenerate?: () => void;
+  onAsk?: (text: string) => void;
 }) {
   if (message.role === "user") return <UserBubble message={message} />;
   return (
@@ -61,6 +63,7 @@ export function MessageBubble({
       streaming={streaming}
       workingLabel={workingLabel}
       onRegenerate={onRegenerate}
+      onAsk={onAsk}
     />
   );
 }
@@ -136,11 +139,13 @@ function AssistantBubble({
   streaming,
   workingLabel,
   onRegenerate,
+  onAsk,
 }: {
   message: ChatMessage;
   streaming: boolean;
   workingLabel?: string;
   onRegenerate?: () => void;
+  onAsk?: (text: string) => void;
 }) {
   const [copied, setCopied] = useState(false);
   const empty = !message.content.trim();
@@ -177,7 +182,9 @@ function AssistantBubble({
         ) : empty && streaming ? (
           <Working label={workingLabel ?? "Thinking"} />
         ) : (
-          <Markdown sources={message.sources}>{message.content}</Markdown>
+          <Markdown sources={message.sources} onAsk={onAsk}>
+            {message.content}
+          </Markdown>
         )}
 
         {!streaming && message.sources && message.sources.length > 0 && (
