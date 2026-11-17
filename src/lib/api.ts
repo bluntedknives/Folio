@@ -1,4 +1,5 @@
 import type { Attachment, ChatMessage, Source, WireMessage, WirePart } from "./types";
+import { withDomain } from "./domain";
 import { latestVideoId } from "./youtube";
 
 export interface StreamHandlers {
@@ -166,13 +167,17 @@ function readSources(header: string | null): Source[] {
   try {
     const parsed = JSON.parse(decodeURIComponent(header)) as unknown;
     if (!Array.isArray(parsed)) return [];
-    return parsed.filter(
-      (s): s is Source =>
-        typeof s === "object" &&
-        s !== null &&
-        typeof (s as Source).url === "string" &&
-        typeof (s as Source).title === "string",
-    );
+    return parsed
+      .filter(
+        (s): s is Source =>
+          typeof s === "object" &&
+          s !== null &&
+          typeof (s as Source).url === "string" &&
+          typeof (s as Source).title === "string",
+      )
+      // The server sets `host` and `site`, but a cached or older response may
+      // not, so they are filled in from the URL rather than left undefined.
+      .map((s) => withDomain({ ...s, snippet: s.snippet ?? "" }));
   } catch {
     return [];
   }

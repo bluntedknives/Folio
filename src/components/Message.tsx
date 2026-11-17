@@ -177,7 +177,7 @@ function AssistantBubble({
         ) : empty && streaming ? (
           <Working label={workingLabel ?? "Thinking"} />
         ) : (
-          <Markdown>{message.content}</Markdown>
+          <Markdown sources={message.sources}>{message.content}</Markdown>
         )}
 
         {!streaming && message.sources && message.sources.length > 0 && (

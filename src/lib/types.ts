@@ -52,6 +52,14 @@ export interface Source {
   title: string;
   url: string;
   snippet: string;
+  /**
+   * The domain the result actually lives on, `www.` stripped and lowercased.
+   * Resolved on the server from the final URL, so the client never has to
+   * parse one and cannot show a host the link does not go to.
+   */
+  host?: string;
+  /** Friendly site name for display, e.g. "Wikipedia". Falls back to `host`. */
+  site?: string;
 }
 
 /**

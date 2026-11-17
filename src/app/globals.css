@@ -865,20 +865,138 @@ input {
   transition: opacity 0.16s, background-color 0.16s, color 0.16s, transform 0.12s var(--ease-out);
 }
 
-/* ---------- sources ---------- */
+/* ---------- web sources ---------- */
 
-.source-link {
-  display: block;
-  font-size: 0.8125rem;
-  line-height: 1.45;
-  color: var(--ink-800);
+/* A source row is a link, not a block of text: the domain leads, the title
+   follows, and the whole row lifts on hover so the target is obvious. */
+.source-row {
   text-decoration: none;
-  transition: color 0.16s;
+  transition: background-color 0.16s var(--ease-out);
 }
-.source-link:hover {
+.source-row:hover {
+  background-color: var(--ink-150);
+}
+
+/* The monogram badge. A letter, not a favicon: fetching one would leak the
+   fact that this page was opened. */
+.source-badge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border-radius: 6px;
+  border: 1px solid var(--stroke);
+  background-color: var(--ink-150);
+  color: var(--ink-600);
+  font-weight: 600;
+  line-height: 1;
+}
+.source-badge {
+  height: 22px;
+  width: 22px;
+  margin-top: 1px;
+  font-size: 0.625rem;
+}
+
+.source-title {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.8125rem;
+  line-height: 1.4;
+  color: var(--ink-800);
+}
+.source-row:hover .source-title {
   color: var(--accent);
-  text-decoration: underline;
-  text-underline-offset: 2px;
+}
+
+.source-host {
+  display: flex;
+  align-items: baseline;
+  gap: 0.3rem;
+  margin-top: 1px;
+  overflow: hidden;
+  font-size: 0.6875rem;
+  line-height: 1.4;
+  color: var(--ink-500);
+}
+.source-site {
+  flex-shrink: 0;
+  color: var(--ink-600);
+}
+.source-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink-450);
+}
+
+.source-index {
+  flex-shrink: 0;
+  margin-top: 1px;
+  font-size: 0.625rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-400);
+}
+
+/* A brief highlight when a citation chip scrolls to its row. */
+@keyframes source-flash {
+  0%,
+  100% {
+    background-color: transparent;
+  }
+  25% {
+    background-color: var(--accent-glow);
+  }
+}
+.source-row-flash {
+  animation: source-flash 1.2s var(--ease-out);
+}
+
+/* Inline citation chips: a `[n]` marker in the answer becomes one of these, so
+   a claim points at its source without breaking the sentence. */
+.cite-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.15rem;
+  margin: 0 0.1rem;
+  border-radius: 999px;
+  border: 1px solid var(--stroke);
+  background-color: var(--ink-100);
+  padding: 0.0625rem 0.375rem 0.0625rem 0.1875rem;
+  font-size: 0.625rem;
+  line-height: 1.35;
+  color: var(--ink-600);
+  vertical-align: 0.05em;
+  transition:
+    border-color 0.16s var(--ease-out),
+    background-color 0.16s var(--ease-out),
+    color 0.16s var(--ease-out),
+    transform 0.16s var(--ease-out);
+}
+.cite-chip:hover {
+  border-color: var(--stroke-strong);
+  background-color: var(--ink-150);
+  color: var(--ink-800);
+  transform: translateY(-1px);
+}
+.cite-chip-badge {
+  display: flex;
+  height: 14px;
+  width: 14px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  border: 1px solid var(--stroke);
+  background-color: var(--ink-150);
+  font-size: 0.5rem;
+  font-weight: 600;
+  color: var(--ink-600);
+  line-height: 1;
+}
+.cite-chip-n {
+  font-variant-numeric: tabular-nums;
 }
 
 /* ---------- linked video ---------- */

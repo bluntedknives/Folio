@@ -1,4 +1,5 @@
 import type { Source } from "./types";
+import { capPerDomain, withDomain } from "./domain";
 
 /**
  * Web search, run on the server so there is no CORS problem, the query never
@@ -15,6 +16,12 @@ import type { Source } from "./types";
  *
  * Both are best-effort. A failure yields fewer results, never an error, so a
  * question is always answered even when search is unavailable.
+ *
+ * Every result's `host` and `site` are derived from the result URL itself, in
+ * `domain.ts`. The search engine's own display string is only used as a
+ * cross-check: when the two disagree the URL wins, because the display string
+ * is what a student reads and a label that disagrees with its link is worse
+ * than no label.
  */
 
 const DDG_ENDPOINT = "https://html.duckduckgo.com/html/";
@@ -25,7 +32,9 @@ const DDG_UA =
 /** Wikipedia asks for a descriptive agent with contact info. */
 const WIKI_UA = "Folio/0.1 (homework helper; +https://github.com/bluntedknives/Folio)";
 
-const MAX_RESULTS = 6;
+const MAX_RESULTS = 8;
+/** At most this many results from one registrable domain, so no site dominates. */
+const PER_DOMAIN = 2;
 const TIMEOUT_MS = 8000;
 const CACHE_TTL_MS = 5 * 60 * 1000;
 const CACHE_MAX = 100;
@@ -50,7 +59,12 @@ export async function search(query: string): Promise<Source[]> {
     wikipedia(trimmed).catch(() => []),
   ]);
 
-  const results = dedupe([...ddg, ...wiki]).slice(0, MAX_RESULTS);
+  const merged = dedupe([...ddg, ...wiki]);
+  // Cap per domain so one site cannot fill the list, but fall back to the
+  // uncapped list when that leaves too little to be useful (e.g. a query whose
+  // every hit is on one big site).
+  const capped = capPerDomain(merged, PER_DOMAIN);
+  const results = (capped.length >= 4 ? capped : merged).slice(0, MAX_RESULTS);
 
   if (cache.size >= CACHE_MAX) {
     const oldest = [...cache.entries()].sort((a, b) => a[1].at - b[1].at)[0];
@@ -102,13 +116,33 @@ async function duckDuckGo(query: string): Promise<Source[]> {
     const title = stripTags(match[2]).trim();
     if (!url || !title) continue;
 
+    // A link that did not unwrap still points at the engine itself. Showing
+    // "duckduckgo.com" as the domain of a result would be a plain lie, so a
+    // result that resolves to the engine is dropped rather than mislabelled.
+    const host = hostFromUrl(url);
+    if (!host || isEngineHost(host)) continue;
+
     const after = html.slice(match.index + match[0].length);
     const snippetMatch = /<a[^>]*class="result__snippet"[^>]*>([\s\S]*?)<\/a>/.exec(after);
     const snippet = snippetMatch ? stripTags(snippetMatch[1]).trim().slice(0, 320) : "";
 
-    out.push({ title: title.slice(0, 160), url, snippet });
+    out.push(withDomain({ title: title.slice(0, 160), url, snippet, host }));
   }
   return out;
+}
+
+/** Hosts that mean a result link failed to unwrap to its real destination. */
+function isEngineHost(host: string): boolean {
+  return /(^|\.)duckduckgo\.com$/i.test(host);
+}
+
+/** The `www.`-stripped host of a URL, or "" when it cannot be parsed. */
+function hostFromUrl(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "").toLowerCase();
+  } catch {
+    return "";
+  }
 }
 
 /** Wikipedia search with intro extracts, which gives real quotable context. */
@@ -140,11 +174,13 @@ async function wikipedia(query: string): Promise<Source[]> {
 
   return pages
     .filter((p) => p.title && p.fullurl)
-    .map((p) => ({
-      title: p.title!,
-      url: p.fullurl!,
-      snippet: (p.extract ?? "").replace(/\s+/g, " ").trim().slice(0, 320),
-    }));
+    .map((p) =>
+      withDomain({
+        title: p.title!,
+        url: p.fullurl!,
+        snippet: (p.extract ?? "").replace(/\s+/g, " ").trim().slice(0, 320),
+      }),
+    );
 }
 
 /** Drops duplicate URLs, keeping the first occurrence. */
@@ -189,15 +225,20 @@ function decodeEntities(text: string): string {
 
 /**
  * Renders results into the block that gets appended to the system prompt.
- * Numbered so the model can cite them, with the URL inline.
+ * Numbered so the model can cite them, with the domain named and the exact URL
+ * inline, so a citation names the site and links to the page it came from.
  */
 export function formatSources(results: Source[]): string {
   if (results.length === 0) return "";
-  const lines = results.map(
-    (r, i) => `[${i + 1}] ${r.title}\n${r.url}${r.snippet ? `\n${r.snippet}` : ""}`,
-  );
+  const lines = results.map((r, i) => {
+    const head = `[${i + 1}] ${r.title}`;
+    const site = r.site && r.site !== r.host ? ` (${r.site})` : "";
+    const domain = r.host ? `\nDomain: ${r.host}${site}` : "";
+    return `${head}${domain}\n${r.url}${r.snippet ? `\n${r.snippet}` : ""}`;
+  });
   return [
     "Web results for this question. Use them for facts and cite the ones you use as Markdown links.",
+    "Link the exact URL given, never the site's home page, and name the site (its Domain) when you cite it.",
     "",
     ...lines,
   ].join("\n");

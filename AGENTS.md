@@ -304,6 +304,21 @@ HEAD:main`); keep it that way rather than merging, so the two stay identical.
 - Reading a linked page reuses the video path's shape: the URL is the only
   thing that travels, the server fetches it per turn, and nothing is stored.
   Search is skipped when a page is linked, because the page is the source.
+- A search result's `host` and `site` are derived from the result URL in
+  `domain.ts`, never copied from the engine's display string. DuckDuckGo's HTML
+  endpoint returns redirect links, so the parser unwraps `uddg=` to the real
+  destination first and drops a result that does not unwrap (its host would be
+  the engine itself). The display string is only a cross-check, because a label
+  that disagrees with its link is worse than no label. Results are capped at two
+  per registrable domain, falling back to the uncapped list when that leaves
+  fewer than four, so one site cannot fill the panel.
+- A citation in an answer becomes an inline chip in `Markdown.tsx`, which
+  handles all three ways a model cites: a bare `[n]` marker (rewritten to a
+  sentinel code span), a Markdown link, and a pasted URL (GFM autolinks it). The
+  chip scrolls to its row in the sources panel instead of opening the site, so
+  the title and snippet are read first. The badge is a monogram, never a
+  favicon: fetching one would tell the site's server that this chat happened,
+  which is what the app promises not to do.
 - `page-server.ts` refuses a URL unless it is http(s) on port 80/443, resolves
   to public addresses only, and every redirect hop is re-checked. The private
   and link-local ranges are refused in both IP versions; the link-local block

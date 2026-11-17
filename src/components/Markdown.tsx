@@ -7,34 +7,116 @@ import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import rehypeHighlight from "rehype-highlight";
 import { CheckIcon, CopyIcon } from "./icons";
+import { CiteChip } from "./CiteChip";
 import { Graph } from "./graph/Graph";
 import { parseGraphSpec } from "@/lib/graph/spec";
+import { normalizeUrl } from "@/lib/domain";
+import type { Source } from "@/lib/types";
 
 /**
  * Assistant output is Markdown with LaTeX. Highlighting and KaTeX run
  * client-side only, so the streaming path re-renders cheaply as text grows.
  *
  * `variant="think"` is the compact treatment used inside the reasoning panel.
+ *
+ * When `sources` is given, a citation becomes an inline chip: a bare `[n]`
+ * marker, a Markdown link, or a pasted URL that points at one of the results is
+ * replaced by a chip naming the site. Models cite in all three ways, so all
+ * three are handled rather than showing a raw bracket or a long URL.
  */
 export const Markdown = memo(function Markdown({
   children,
   variant = "answer",
+  sources,
 }: {
   children: string;
   variant?: "answer" | "think";
+  sources?: Source[];
 }) {
+  const byUrl = sources?.length ? sourceIndex(sources) : null;
+  const components = byUrl
+    ? { pre: CodeBlock, a: citationLink(byUrl, sources!), code: inlineCitation(sources!) }
+    : { pre: CodeBlock, a: ExternalLink };
+
   return (
     <div className={variant === "think" ? "md md-think" : "md"}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkMath]}
         rehypePlugins={[rehypeKatex, [rehypeHighlight, { detect: true, ignoreMissing: true }]]}
-        components={{ pre: CodeBlock, a: ExternalLink }}
+        components={components}
       >
-        {normalizeMath(children)}
+        {byUrl ? withCitationMarkers(normalizeMath(children)) : normalizeMath(children)}
       </ReactMarkdown>
     </div>
   );
 });
+
+/** Normalized URL of each result to its 1-based position. */
+function sourceIndex(sources: Source[]): Map<string, number> {
+  const index = new Map<string, number>();
+  sources.forEach((source, i) => {
+    const key = normalizeUrl(source.url);
+    if (key && !index.has(key)) index.set(key, i + 1);
+  });
+  return index;
+}
+
+/**
+ * A link that points at one of the results becomes a chip, whether the model
+ * wrote `[n](url)` or pasted a bare URL (GFM autolinks the latter). Any other
+ * link stays an ordinary external link.
+ */
+function citationLink(byUrl: Map<string, number>, sources: Source[]) {
+  return function CitationLink({ href, children }: { href?: string; children?: ReactNode }) {
+    const n = href ? byUrl.get(normalizeUrl(href)) : undefined;
+    if (n) return <CiteChip n={n} source={sources[n - 1]} />;
+    return (
+      <a href={href} target="_blank" rel="noopener noreferrer nofollow">
+        {children}
+      </a>
+    );
+  };
+}
+
+/**
+ * A `[n]` marker in the answer, rendered as a chip. Markers are rewritten to an
+ * inline code span carrying a sentinel first, so this sees them as inline code
+ * and can swap in the chip.
+ */
+function inlineCitation(sources: Source[]) {
+  return function InlineCode({
+    children,
+    className,
+  }: {
+    children?: ReactNode;
+    className?: string;
+  }) {
+    if (!className) {
+      const match = /^\uE000(\d{1,2})\uE000$/.exec(extractCode(children));
+      if (match) {
+        const n = Number(match[1]);
+        return <CiteChip n={n} source={sources[n - 1]} />;
+      }
+    }
+    return <code className={className}>{children}</code>;
+  };
+}
+
+/**
+ * Rewrites bare `[n]` citation markers to an inline code span carrying a
+ * private-use sentinel, which the renderer turns into a chip. Fenced blocks and
+ * inline code are left alone, since a snippet may contain brackets that mean
+ * something else. A `[n](url)` link is not a marker and is left as a link.
+ */
+function withCitationMarkers(source: string): string {
+  return source
+    .split(/(```[\s\S]*?```|~~~[\s\S]*?~~~|`[^`\n]*`)/)
+    .map((part, index) => {
+      if (index % 2 === 1) return part;
+      return part.replace(/\[(\d{1,2})\](?!\()/g, "`\uE000$1\uE000`");
+    })
+    .join("");
+}
 
 /**
  * Most models write inline maths as \( ... \) and display maths as
