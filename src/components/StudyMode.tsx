@@ -19,6 +19,7 @@ import {
   rememberSignature,
   signatureDistance,
   startScreenShare,
+  studyHistory,
   wasSignatureRead,
 } from "@/lib/capture";
 import { Markdown } from "./Markdown";
@@ -93,6 +94,24 @@ function clock(total: number): string {
 }
 
 /**
+ * The conversation a read is answered in, oldest first.
+ *
+ * Study mode is one session, not a run of unrelated questions: the page read a
+ * minute ago is still in front of the model when the next one is asked about.
+ * Questions and answers both go in, without their frames, so a follow-up
+ * resolves against what was just discussed and the prompt does not carry every
+ * old screenshot.
+ */
+function studyContext(turns: Turn[], seed: string): ChatMessage[] {
+  return studyHistory(turns).map((m, i) => ({
+    id: `${seed}-h${i}`,
+    role: m.role,
+    content: m.content,
+    createdAt: 0,
+  }));
+}
+
+/**
  * Study mode, built as a media player. Sharing a screen puts the live screen on
  * the stage as the video, and the answer plays out beneath it, revealed a
  * character at a time like playback. The Answer button reads whatever is on
@@ -160,51 +179,62 @@ export function StudyMode({ open, onClose }: { open: boolean; onClose: () => voi
     turnsRef.current = turns;
   }, [turns]);
 
-  /** Runs one question against a captured frame, streaming into the turn. */
-  const ask = useCallback(async (attachment: Attachment, question: string, id: string) => {
-    const controller = new AbortController();
-    inFlight.current.add(controller);
-    setBusy(true);
-    try {
-      // The shared screen's sound, when the user turned listening on. It is
-      // stopped here so each clip is what was said since the last question.
-      const clip = audioRef.current ? await audioRef.current.stop() : null;
-      const attachments = clip ? [attachment, clip] : [attachment];
-      const { model } = routeFor({
-        hasImages: true,
-        hasAudio: Boolean(clip),
-        prompt: question,
-      });
-      const history: ChatMessage[] = [
-        { id, role: "user", content: question, attachments, createdAt: Date.now() },
-      ];
-      await streamChat(model, history, question, controller.signal, {
-        onReasoning: () => {},
-        onContent: (delta) => {
-          setTurns((prev) =>
-            prev.map((t) => (t.id === id ? { ...t, answer: t.answer + delta } : t)),
-          );
-        },
-        onSources: () => {},
-        onDone: () => {},
-      });
-    } catch (err) {
-      const message = controller.signal.aborted
-        ? undefined
-        : err instanceof ChatError
-          ? err.message
-          : "Could not read the screen.";
-      setTurns((prev) => prev.map((t) => (t.id === id ? { ...t, error: message } : t)));
-    } finally {
-      inFlight.current.delete(controller);
-      // Listening resumes for the next question, so nothing said in between is
-      // lost and the recorder is not left running across turns.
-      audioRef.current?.start();
-      // Only clear the busy flag once every request has finished, so a typed
-      // question that overlaps an auto answer does not read as "idle" early.
-      if (inFlight.current.size === 0) setBusy(false);
-    }
-  }, []);
+  /**
+   * Runs one question against a captured frame, streaming into the turn.
+   *
+   * `context` is the conversation so far, oldest first. Study mode is one
+   * scrolling session: a page read a minute ago is still in front of the model
+   * when the next one is asked about, so "now do part b" and "why" resolve
+   * against what was just answered instead of each read standing alone.
+   */
+  const ask = useCallback(
+    async (attachment: Attachment, question: string, id: string, context: ChatMessage[]) => {
+      const controller = new AbortController();
+      inFlight.current.add(controller);
+      setBusy(true);
+      try {
+        // The shared screen's sound, when the user turned listening on. It is
+        // stopped here so each clip is what was said since the last question.
+        const clip = audioRef.current ? await audioRef.current.stop() : null;
+        const attachments = clip ? [attachment, clip] : [attachment];
+        const { model } = routeFor({
+          hasImages: true,
+          hasAudio: Boolean(clip),
+          prompt: question,
+        });
+        const messages: ChatMessage[] = [
+          ...context,
+          { id, role: "user", content: question, attachments, createdAt: Date.now() },
+        ];
+        await streamChat(model, messages, question, controller.signal, {
+          onReasoning: () => {},
+          onContent: (delta) => {
+            setTurns((prev) =>
+              prev.map((t) => (t.id === id ? { ...t, answer: t.answer + delta } : t)),
+            );
+          },
+          onSources: () => {},
+          onDone: () => {},
+        });
+      } catch (err) {
+        const message = controller.signal.aborted
+          ? undefined
+          : err instanceof ChatError
+            ? err.message
+            : "Could not read the screen.";
+        setTurns((prev) => prev.map((t) => (t.id === id ? { ...t, error: message } : t)));
+      } finally {
+        inFlight.current.delete(controller);
+        // Listening resumes for the next question, so nothing said in between is
+        // lost and the recorder is not left running across turns.
+        audioRef.current?.start();
+        // Only clear the busy flag once every request has finished, so a typed
+        // question that overlaps an auto answer does not read as "idle" early.
+        if (inFlight.current.size === 0) setBusy(false);
+      }
+    },
+    [],
+  );
 
   /**
    * Adds a photo of the work and answers it. This is the whole point of Study
@@ -226,7 +256,7 @@ export function StudyMode({ open, onClose }: { open: boolean; onClose: () => voi
         setTurns((prev) => [...prev, { id, question: text, answer: "" }].slice(-MAX_TURNS));
         setRevealed((prev) => ({ ...prev, [id]: 0 }));
         stick.current = true;
-        void ask(first, text, id);
+        void ask(first, text, id, studyContext(turnsRef.current, id));
       } catch (err) {
         setError(err instanceof AttachmentRejected ? err.message : "That image could not be read.");
       }
@@ -315,10 +345,13 @@ export function StudyMode({ open, onClose }: { open: boolean; onClose: () => voi
 
       const id = `t${idRef.current++}`;
       const text = asked || DEFAULT_QUESTION;
+      // The conversation so far, oldest first, so this read continues the
+      // session rather than standing alone.
+      const context = studyContext(turnsRef.current, id);
       setTurns((prev) => [...prev, { id, question: text, answer: "" }].slice(-MAX_TURNS));
       setRevealed((prev) => ({ ...prev, [id]: 0 }));
       stick.current = true;
-      void ask(attachment, text, id);
+      void ask(attachment, text, id, context);
     },
     [ask, photo],
   );
@@ -471,6 +504,26 @@ export function StudyMode({ open, onClose }: { open: boolean; onClose: () => voi
       if (retry) clearTimeout(retry);
     };
   }, [pipWindow]);
+
+  /**
+   * Closing the floating window has to end the share.
+   *
+   * The window is the only place the stage lives once the panel is floated, and
+   * its native close button is outside the app: nothing in React hears it. Left
+   * alone the capture keeps running behind a window that is gone, and the
+   * browser's own "Stop sharing" bar is the only way out. `pagehide` fires as
+   * the window goes, so the stream is released there and the panel returns to
+   * the page instead of being stranded in a dead document.
+   */
+  useEffect(() => {
+    if (!pipWindow) return;
+    const onHide = () => {
+      stopShare();
+      setPipWindow(null);
+    };
+    pipWindow.addEventListener("pagehide", onHide);
+    return () => pipWindow.removeEventListener("pagehide", onHide);
+  }, [pipWindow, stopShare]);
 
   // The reveal. Buffered text plays out at a readable speed, so the answer
   // arrives like a video rather than snapping into place.

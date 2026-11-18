@@ -1,5 +1,6 @@
 import { readChatRequest } from "@/lib/validation";
 import { SYSTEM_PROMPT, getModel, routeFor, thinkingFor } from "@/lib/models";
+import { withDeckTopic } from "@/lib/deck";
 import { formatSources, search, shouldSearch } from "@/lib/search";
 import { formatUnreadableVideo, formatVideo, loadVideo } from "@/lib/youtube-server";
 import { formatPages, loadPages } from "@/lib/page-server";
@@ -88,9 +89,27 @@ export async function POST(request: Request) {
     .join("\n\n");
   const systemPrompt = extras ? `${SYSTEM_PROMPT}\n\n${extras}` : SYSTEM_PROMPT;
 
+  // A deck request that names no topic gets one here. The system prompt asks
+  // the model to invent one, and it usually does, but "usually" is not always:
+  // a bare "make a deck" sometimes comes back as "what topic would you like?",
+  // which is the one answer a deck request must never get. Filling the topic in
+  // on the way upstream makes a deck the only possible outcome, whatever the
+  // model is in the mood for.
+  const askedIndex = parsed.body.messages.reduce(
+    (last, m, i) => (m.role === "user" ? i : last),
+    -1,
+  );
+  const asked =
+    askedIndex >= 0 ? parsed.body.messages[askedIndex].content || parsed.body.query : parsed.body.query;
+  const withTopic = withDeckTopic(asked);
+  const wire =
+    withTopic === asked
+      ? parsed.body.messages
+      : parsed.body.messages.map((m, i) => (i === askedIndex ? { ...m, content: withTopic } : m));
+
   // Frames are attached to the newest turn, which is what the model is being
   // asked about. Older turns keep only their text.
-  const messages = toUpstream(parsed.body.messages, video?.frames ?? []);
+  const messages = toUpstream(wire, video?.frames ?? []);
 
   // A video carries images, and only the multimodal model can see them. The
   // route was chosen from the text alone, so it is corrected here rather than

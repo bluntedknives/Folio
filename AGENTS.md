@@ -232,6 +232,25 @@ HEAD:main`); keep it that way rather than merging, so the two stay identical.
   16:9 box sized by width is taller than a wide viewport, so the transport and
   the answer were pushed below the fold and the expanded player looked like a
   black screen with only the header showing.
+- Study mode is one session, not a run of unrelated reads. `studyHistory` in
+  `capture.ts` turns the panel's finished turns into a conversation (oldest
+  first) and `ask` sends it ahead of the new frame, so "now do part b" and "why"
+  resolve against what was just discussed. Only questions and answers go in,
+  never their frames: resending every screenshot would bloat the prompt and the
+  newest frame is the one the question is about. A turn with no answer is
+  skipped, so a failed read does not leave a question dangling. Without this the
+  model met every page cold and said it did not know what "part b" meant.
+- Closing the floated PiP window ends the share. The window's native close
+  button is outside the app, so nothing in React hears it: without the
+  `pagehide` handler the capture kept running behind a window that was gone and
+  the browser's "Stop sharing" bar was the only way out.
+- A deck request that names no topic gets one filled in server-side, in
+  `src/lib/deck.ts`, before the prompt goes upstream. The system prompt asks the
+  model to invent a topic and it usually does, but a bare "make a deck" came
+  back as "what topic would you like?" often enough to matter. `withDeckTopic`
+  only touches a request that has both a deck noun and a making verb and no
+  subject of its own, so "explain this slide" and "make slides about mitosis"
+  pass through untouched. With the guard, bare prompts produced a deck 36/36.
 - Chat persistence has two rules that are easy to regress. A sent message is
   written immediately, not on the debounce: reloading within the first second
   after sending used to lose the question entirely. And hydrate must not

@@ -429,6 +429,36 @@ export function containsSignature(seen: string, sig: string): boolean {
 }
 
 /**
+ * One answered turn of a study session, as the panel keeps it.
+ */
+export interface StudyTurn {
+  question: string;
+  answer: string;
+}
+
+/**
+ * The conversation a read is answered in, oldest first.
+ *
+ * Study mode is one session, not a run of unrelated questions: the page read a
+ * minute ago is still in front of the model when the next one is asked about.
+ * Each finished turn goes in as its question and the answer it got, so "now do
+ * part b" and "why" resolve against what was just discussed rather than the
+ * model meeting every page cold. A turn with no answer is skipped, so a failed
+ * read does not leave a question dangling with nothing after it.
+ */
+export function studyHistory(
+  turns: StudyTurn[],
+): { role: "user" | "assistant"; content: string }[] {
+  const out: { role: "user" | "assistant"; content: string }[] = [];
+  for (const turn of turns) {
+    if (!turn.answer.trim()) continue;
+    out.push({ role: "user", content: turn.question });
+    out.push({ role: "assistant", content: turn.answer });
+  }
+  return out;
+}
+
+/**
  * True when a frame is a single flat colour, which is what the screen looks
  * like for the first moments of a share. Reading one wastes a call and comes
  * back as "there is nothing here", so it is worth skipping. Works off the
