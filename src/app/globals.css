@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "mafs/core.css";
 
 /*
   Design tokens. Light is the default; `.dark` on <html> flips the ramp.
@@ -670,29 +671,44 @@ input {
   background: var(--ink-250);
   color: var(--ink-800);
 }
-.graph-svg {
-  display: block;
-  width: 100%;
-  height: auto;
-  touch-action: none;
+/* The plot is Mafs. It is themed entirely through its own CSS variables, which
+   we point at the app's graph tokens so light and dark both work from one path.
+   The tick font matches the app's mono ramp; Mafs' `mafs-shadow` halo keeps the
+   numbers legible where they cross a gridline or a curve. */
+.graph-plot {
+  position: relative;
+  background: var(--graph-paper);
   cursor: crosshair;
+
+  --mafs-bg: var(--graph-paper);
+  --mafs-fg: var(--ink-700);
+  --mafs-origin-color: var(--graph-axis);
+  --mafs-line-color: var(--graph-grid);
+  --grid-line-subdivision-color: var(--graph-grid-minor);
+  --mafs-axis-stroke-width: 1.4px;
 }
-.graph-tick {
+.graph-plot .MafsView {
   font-family: var(--font-mono);
-  font-size: 9.5px;
-  fill: var(--ink-500);
-  user-select: none;
+}
+.graph-plot .mafs-axis text {
+  font-size: 11px;
 }
 .graph-axis-name {
+  position: absolute;
   font-family: var(--font-mono);
-  font-size: 10.5px;
+  font-size: 11px;
   font-style: italic;
-  fill: var(--ink-500);
+  color: var(--ink-500);
+  pointer-events: none;
   user-select: none;
 }
-.graph-label {
-  font-family: var(--font-mono);
-  font-size: 10px;
+.graph-axis-x {
+  right: 6px;
+  bottom: 3px;
+}
+.graph-axis-y {
+  top: 4px;
+  left: 6px;
 }
 .graph-foot {
   display: flex;

@@ -163,17 +163,35 @@ HEAD:main`); keep it that way rather than merging, so the two stay identical.
 - eslint rejects `setState` called synchronously in an effect
   (`react-hooks/set-state-in-effect`). Use `useSyncExternalStore` for external
   state such as the DOM.
+- Graphs are drawn locally by `Graph.tsx` on top of **Mafs 0.21.0**
+  (mafs.dev), which is bundled — no script tag, no API key, no network. Mafs
+  gives adaptive curve sampling, a squared-up coordinate space, gridline panes,
+  haloed tick labels and pointer pan/zoom; `Graph.tsx` only maps the parsed spec
+  onto its primitives (`Plot.OfX`, `Point`, `Line.ThroughPoints`, `Polyline`,
+  `Text`) and adds the hover readout and sliders. Do not hand-roll an SVG
+  plotter again — the old one is what this replaced.
+- Mafs is themed entirely through its own CSS variables, set on `.graph-plot`
+  in `globals.css` from the app tokens (`--mafs-bg`/`--mafs-fg` from
+  `--graph-paper`/`--ink-700`, `--mafs-line-color`/`--grid-line-subdivision-color`
+  from `--graph-grid`/`--graph-grid-minor`, `--mafs-origin-color` from
+  `--graph-axis`). Both themes work from one code path. `mafs/core.css` is
+  imported at the top of `globals.css`.
+- Mafs draws on **square units**: it always shows the same number of units per
+  pixel on both axes, widening whichever span is smaller. So an auto-fit window
+  must be square (`computeBounds`), or the curve is squashed to nothing. An
+  explicit `y:` in the spec is honoured as-is; the window is then widened, not
+  the curve stretched.
+- Mafs owns its own camera, so "Reset view" remounts `<Mafs>` with a new `key`
+  rather than poking at internals. The hover readout inverts Mafs' view matrix
+  (reported by `TransformReporter` via `useTransformContext`) plus the SVG CTM
+  to turn a pointer position back into maths coordinates.
 - Graph curve colours come from `PALETTE` in `src/lib/graph/spec.ts`, which
   resolves `var(--g1..--g6)` so the same spec renders on both canvases.
-- Graphs are drawn locally into SVG by `Graph.tsx` — no script, no API key, no
-  network. The renderer imitates Desmos: minor and major gridlines, axes pinned
-  to the origin or the nearest edge, arrowheads, italic axis names, and Desmos'
-  own curve palette (`--g1..--g7`, reordered in `PALETTE`). Colours, paper and
-  grid all resolve through CSS variables (`--graph-paper`, `--graph-grid`,
-  `--graph-grid-minor`, `--graph-axis`) so both themes work from one code path.
-  The Desmos API was removed deliberately: it cannot be embedded without a key
+  `PALETTE` is ordered to match Desmos' own curve palette.
+- The Desmos API was removed deliberately: it cannot be embedded without a key
   (every script version 403s without one), so a "Desmos" button would have been
-  either broken or dependent on a trial key.
+  either broken or dependent on a trial key. Mafs is the keyless local
+  replacement, not a second implementation.
 - The `graph` fence tag is matched three ways in `Markdown.tsx`: as a normal
   language tag, nested inside another fence (`unwrapFence`), and on a line of
   its own (`detectTaglessSpec`). The last case needs the body to parse before
