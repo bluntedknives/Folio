@@ -83,6 +83,15 @@ function inlineHtml(text: string): string {
     .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2">$1</a>');
 }
 
+/** Inline emphasis as plain text, for formats that carry no markup. */
+function inlineText(text: string): string {
+  return text
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/(^|\W)\*([^*]+)\*/g, "$1$2")
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, "$1");
+}
+
 /* ------------------------------------------------------------ deck to HTML */
 
 /** One slide as a static HTML section, shared by the file export and print. */
@@ -210,6 +219,103 @@ ${slides}
 
 export function downloadDeckHtml(deck: Deck): void {
   download(new Blob([deckToHtml(deck)], { type: "text/html;charset=utf-8" }), deckFilename(deck, "html"));
+}
+
+/* ------------------------------------------------------- google docs/slides */
+
+/**
+ * The deck as HTML that Google Docs will keep its formatting from.
+ *
+ * There is no API to create a Doc from the browser without an OAuth app, and
+ * the account is not ours to ask for. Google's own importer is the way in: it
+ * reads pasted HTML and keeps headings, lists and emphasis, which is what the
+ * "Open in Google Docs" buttons on the web rely on.
+ *
+ * Layout is one heading per slide: a Doc has no slides, so the outline is the
+ * honest representation.
+ */
+export function deckToDocHtml(deck: Deck): string {
+  const sections = deck.slides.map((slide, i) => {
+    const title = slide.title || `Slide ${i + 1}`;
+    const body = slide.body.map((line) => `<p>${inlineHtml(line)}</p>`).join("");
+    const bullets = slide.bullets.length
+      ? `<${slide.ordered ? "ol" : "ul"}>${slide.bullets
+          .map((item) => `<li>${inlineHtml(item)}</li>`)
+          .join("")}</${slide.ordered ? "ol" : "ul"}>`
+      : "";
+    const quote = slide.quote ? `<blockquote>${inlineHtml(slide.quote)}</blockquote>` : "";
+    const code = slide.code ? `<pre>${escapeHtml(slide.code.text)}</pre>` : "";
+    const subtitle = slide.subtitle ? `<p><em>${inlineHtml(slide.subtitle)}</em></p>` : "";
+    const notes = slide.notes ? `<p><em>Notes: ${inlineHtml(slide.notes)}</em></p>` : "";
+    return `<h2>${i + 1}. ${escapeHtml(title)}</h2>${subtitle}${body}${bullets}${quote}${code}${notes}`;
+  });
+
+  return `<!doctype html>
+<html><head><meta charset="utf-8" /><title>${escapeHtml(deck.title)}</title></head>
+<body>
+<h1>${escapeHtml(deck.title)}</h1>
+${deck.subtitle ? `<p><em>${escapeHtml(deck.subtitle)}</em></p>` : ""}
+${sections.join("\n")}
+</body></html>`;
+}
+
+/** The deck as a plain-text outline, for pasting into a Doc's outline pane. */
+export function deckToText(deck: Deck): string {
+  const out: string[] = [deck.title];
+  if (deck.subtitle) out.push(deck.subtitle);
+  deck.slides.forEach((slide, i) => {
+    out.push("", `${i + 1}. ${slide.title || "Untitled"}`);
+    if (slide.subtitle) out.push(slide.subtitle);
+    for (const line of slide.body) out.push(inlineText(line));
+    for (const item of slide.bullets) out.push(`${slide.ordered ? "1." : "-"} ${inlineText(item)}`);
+    if (slide.quote) out.push(`"${inlineText(slide.quote)}"`);
+    if (slide.code) out.push(slide.code.text);
+  });
+  return out.join("\n");
+}
+
+/** Google's short link that opens a new blank Doc. */
+const DOCS_IMPORT_URL = "https://docs.new";
+
+/** How much of the deck made it onto the clipboard. */
+export type DocsCopyResult = "rich" | "plain" | "none";
+
+/**
+ * Hands the deck to Google Docs. The rich HTML goes on the clipboard so a paste
+ * into a new Doc keeps headings and lists. A browser that refuses the rich write
+ * gets a plain-text copy instead, and one that refuses both is reported as such
+ * rather than being passed off as a copy that never happened.
+ *
+ * The write has to run before the Doc tab is opened, because opening it takes
+ * focus away and a clipboard write is refused once the document is unfocused.
+ */
+export async function copyDeckForDocs(deck: Deck): Promise<DocsCopyResult> {
+  const html = deckToDocHtml(deck);
+  const text = deckToText(deck);
+  try {
+    if (typeof ClipboardItem !== "undefined" && navigator.clipboard?.write) {
+      await navigator.clipboard.write([
+        new ClipboardItem({
+          "text/html": new Blob([html], { type: "text/html" }),
+          "text/plain": new Blob([text], { type: "text/plain" }),
+        }),
+      ]);
+      return "rich";
+    }
+  } catch {
+    /* fall through to the plain-text copy */
+  }
+  try {
+    await navigator.clipboard.writeText(text);
+    return "plain";
+  } catch {
+    return "none";
+  }
+}
+
+/** Opens a new blank Google Doc, ready for the copied deck to be pasted in. */
+export function openBlankGoogleDoc(): void {
+  window.open(DOCS_IMPORT_URL, "_blank", "noopener,noreferrer");
 }
 
 /* -------------------------------------------------------------------- print */

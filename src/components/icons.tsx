@@ -406,3 +406,22 @@ export function PencilIcon({ className }: IconProps) {
     </svg>
   );
 }
+
+/** A document sheet, for exporting to Google Docs. */
+export function DocIcon({ className }: IconProps) {
+  return (
+    <svg {...base} className={className}>
+      <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5Z" />
+      <path d="M14 3v5h5M9 13h6M9 17h4" />
+    </svg>
+  );
+}
+
+/** An upward chevron, for opening the export menu. */
+export function ChevronUpSmallIcon({ className }: IconProps) {
+  return (
+    <svg {...base} className={className}>
+      <path d="m6 15 6-6 6 6" />
+    </svg>
+  );
+}

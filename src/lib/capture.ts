@@ -245,6 +245,22 @@ export function frameSignature(video: HTMLVideoElement): string | null {
   return out;
 }
 
+/** Greyscale difference within one cell that counts as a real change. */
+const CELL_DELTA = 12;
+
+/** Grid edge, as an integer, for the alignment below. */
+const SIG_EDGE = 64;
+
+/**
+ * Rows the two grids must still share before a shifted match means anything.
+ *
+ * Scrolling can move any distance, so the offset is searched across the whole
+ * height rather than a fixed window. A quarter of the rows shared is enough for
+ * a match to be believed; past that, almost none of the page is in common and
+ * the two frames are different pages by any useful definition.
+ */
+const MIN_SHARED_ROWS = 16;
+
 /**
  * How different two signatures are, 0 (identical) to 1 (unrelated).
  *
@@ -256,9 +272,57 @@ export function frameSignature(video: HTMLVideoElement): string | null {
  *
  * Measured on a worksheet at 64x64: two samples of the same page differ by
  * 0.0000, moving the cursor by 0.0020, and replacing the questions by 0.0088.
+ *
+ * Scrolling is the awkward case, because it translates the whole page and a
+ * cell-for-cell comparison then reports every cell as changed. The frames are
+ * therefore compared at every vertical offset and the closest alignment wins,
+ * so a page scrolled to and scrolled back from measures as the same page
+ * whatever the distance moved. Offsets are tried nearest-first, so the usual
+ * case of an unchanged page is settled by the first comparison.
+ *
+ * The scan is exact, not sampled: 97 offsets over at most 4096 cells is well
+ * under a millisecond of work, and it runs on a slow timer beside a frame
+ * capture that already touches every pixel.
  */
 export function signatureDistance(a: string, b: string): number {
   if (a.length !== b.length || a.length === 0) return 1;
+  if (a.length !== SIG_EDGE * SIG_EDGE) return directDistance(a, b);
+
+  let best = 1;
+  // Nearest offset first, so an unshifted page costs one comparison and the
+  // exact-match early exit below fires straight away.
+  for (let distance = 0; distance < SIG_EDGE; distance++) {
+    for (const shift of distance === 0 ? [0] : [distance, -distance]) {
+      const d = shiftedDistance(a, b, shift);
+      if (d < best) best = d;
+    }
+    // An exact match at some offset is the answer; nothing can be closer.
+    if (best === 0) break;
+  }
+  return best;
+}
+
+/** Fraction of cells that differ, over the rows the two grids share at `shift`. */
+function shiftedDistance(a: string, b: string, shift: number): number {
+  const top = Math.max(0, shift);
+  const bottom = Math.min(SIG_EDGE, SIG_EDGE + shift);
+  if (bottom - top < MIN_SHARED_ROWS) return 1;
+
+  let changed = 0;
+  let total = 0;
+  for (let row = top; row < bottom; row++) {
+    const base = row * SIG_EDGE;
+    const other = (row - shift) * SIG_EDGE;
+    for (let col = 0; col < SIG_EDGE; col++) {
+      if (Math.abs(a.charCodeAt(base + col) - b.charCodeAt(other + col)) > CELL_DELTA) changed++;
+      total++;
+    }
+  }
+  return total === 0 ? 1 : changed / total;
+}
+
+/** Cell-for-cell distance, for signatures that are not the standard grid. */
+function directDistance(a: string, b: string): number {
   let changed = 0;
   for (let i = 0; i < a.length; i++) {
     if (Math.abs(a.charCodeAt(i) - b.charCodeAt(i)) > CELL_DELTA) changed++;
@@ -266,8 +330,103 @@ export function signatureDistance(a: string, b: string): number {
   return changed / a.length;
 }
 
-/** Greyscale difference within one cell that counts as a real change. */
-const CELL_DELTA = 12;
+/**
+ * Distance above which two frames are different pages.
+ *
+ * Calibrated on a worksheet: a moving cursor measures about 0.002 and a replaced
+ * question about 0.009, so this sits clear of both. It lives here beside the
+ * distance function because the two are calibrated together and moving one
+ * without the other is how the watcher starts reading pages it has already read.
+ */
+export const PAGE_CHANGE_THRESHOLD = 0.005;
+
+/**
+ * How many answered pages are remembered.
+ *
+ * Scrolling back over work that has been read must not ask about it again, and a
+ * student scrolls back often. Only fingerprints are kept, never the frames.
+ */
+export const RECENT_READS = 8;
+
+/** Appends an answered page, dropping the oldest once the memory is full. */
+export function rememberSignature(recent: string[], sig: string): void {
+  recent.push(sig);
+  if (recent.length > RECENT_READS) recent.splice(0, recent.length - RECENT_READS);
+}
+
+/**
+ * True when `sig` matches a page already answered, a scroll either way.
+ *
+ * The comparison is the same translation-tolerant one used to spot a new page,
+ * so a page scrolled to a different position still counts as the page that was
+ * already read rather than a fresh one. A page that has been scrolled partly
+ * off screen is caught by the containment check below.
+ */
+export function wasSignatureRead(recent: string[], sig: string): boolean {
+  // The page usually has not moved at all — the reader scrolled away and back,
+  // or is still settling on it — and a direct comparison settles that far more
+  // cheaply than the translation search below.
+  for (const seen of recent) {
+    if (seen.length === sig.length && directDistance(sig, seen) < PAGE_CHANGE_THRESHOLD) return true;
+  }
+  for (const seen of recent) {
+    if (signatureDistance(sig, seen) < PAGE_CHANGE_THRESHOLD) return true;
+    if (containsSignature(seen, sig)) return true;
+  }
+  return false;
+}
+
+/** Share of a row's cells that may differ and still count as the same row. */
+const ROW_MATCH = 0.06;
+
+/**
+ * Matching rows in a row that mean the frame holds a page already read.
+ *
+ * A student who scrolls down to write leaves the answered question in the top of
+ * the frame and a blank writing area below it. Compared whole, that frame differs
+ * from the answered page — the writing area sits where the old footer was — so
+ * the question looks new and is read a second time. This is the run of rows that
+ * counts as the page still being there, set well above a quarter of the grid so
+ * that two unrelated questions sharing a header are not mistaken for one page.
+ */
+const MIN_CONTAINED_ROWS = 24;
+
+/**
+ * True when `seen` appears inside `sig` as a run of matching rows.
+ *
+ * The frame is compared with the answered page at every vertical offset, and a
+ * run of matching rows is looked for rather than a match over the whole overlap.
+ * That is what lets a page survive being scrolled partly off the top or bottom:
+ * the part still on screen still matches, and the rest of the frame is free to
+ * be blank, or new writing, without spoiling the match.
+ */
+export function containsSignature(seen: string, sig: string): boolean {
+  const grid = SIG_EDGE * SIG_EDGE;
+  if (seen.length !== grid || sig.length !== grid) return false;
+
+  for (let shift = -(SIG_EDGE - 1); shift <= SIG_EDGE - 1; shift++) {
+    const top = Math.max(0, shift);
+    const bottom = Math.min(SIG_EDGE, SIG_EDGE + shift);
+    if (bottom - top < MIN_CONTAINED_ROWS) continue;
+
+    let run = 0;
+    for (let row = top; row < bottom; row++) {
+      const base = row * SIG_EDGE;
+      const other = (row - shift) * SIG_EDGE;
+      let changed = 0;
+      for (let col = 0; col < SIG_EDGE; col++) {
+        if (Math.abs(sig.charCodeAt(base + col) - seen.charCodeAt(other + col)) > CELL_DELTA) changed++;
+      }
+      if (changed / SIG_EDGE <= ROW_MATCH) {
+        run++;
+        if (run >= MIN_CONTAINED_ROWS) return true;
+      } else {
+        run = 0;
+      }
+    }
+  }
+  return false;
+}
 
 /**
  * True when a frame is a single flat colour, which is what the screen looks

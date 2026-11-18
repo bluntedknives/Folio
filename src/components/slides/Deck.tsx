@@ -15,15 +15,20 @@ import {
 import {
   downloadDeckHtml,
   downloadDeckPptx,
+  copyDeckForDocs,
+  openBlankGoogleDoc,
   printDeck,
+  type DocsCopyResult,
 } from "@/lib/slides/export";
 import { SlideView } from "./SlideView";
 import {
   CheckIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
+  ChevronUpSmallIcon,
   CollapseIcon,
   CopyIcon,
+  DocIcon,
   DownloadIcon,
   ExpandIcon,
   PencilIcon,
@@ -65,6 +70,8 @@ export function Deck({
   const [editing, setEditing] = useState(false);
   const [presenting, setPresenting] = useState(false);
   const [copied, setCopied] = useState<"deck" | "outline" | null>(null);
+  const [exportOpen, setExportOpen] = useState(false);
+  const [docsNote, setDocsNote] = useState<string | null>(null);
 
   // Re-seed when the model streams a corrected deck into the same card.
   const sourceKey = parsed.ok ? source : "";
@@ -158,6 +165,27 @@ export function Deck({
     }
   }
 
+  /**
+   * Copies the deck and opens a blank Doc. The copy has to happen before the
+   * window opens, because opening it moves focus away and a clipboard write
+   * outside a user gesture is refused. The note reports which copy landed: rich
+   * text keeps the headings and lists, plain text does not, and a browser that
+   * refuses both is told so instead of being promised a paste that will not
+   * work.
+   */
+  async function sendToDocs() {
+    const result = await copyDeckForDocs(active);
+    setExportOpen(false);
+    const notes: Record<DocsCopyResult, string> = {
+      rich: "Copied. Paste into the new Doc.",
+      plain: "Copied as plain text, so the layout is lost. Paste into the new Doc.",
+      none: "This browser blocked the copy. Use the copy button, or export a Web page and open it in Docs.",
+    };
+    setDocsNote(notes[result]);
+    window.setTimeout(() => setDocsNote(null), 8000);
+    if (result !== "none") openBlankGoogleDoc();
+  }
+
   return (
     <div className="deck-shell">
       <div className="deck-head">
@@ -189,33 +217,84 @@ export function Deck({
             <PlayDeckIcon className="h-3.5 w-3.5" />
             <span className="deck-btn-label">Present</span>
           </button>
-          <button
-            type="button"
-            onClick={() => printDeck(active)}
-            title="Print or save as PDF"
-            className="deck-btn"
-          >
-            <PrinterIcon className="h-3.5 w-3.5" />
-            <span className="deck-btn-label">PDF</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => downloadDeckPptx(active)}
-            title="Download as PowerPoint (.pptx)"
-            className="deck-btn"
-          >
-            <DownloadIcon className="h-3.5 w-3.5" />
-            <span className="deck-btn-label">PPTX</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => downloadDeckHtml(active)}
-            title="Download a self-contained HTML deck"
-            className="deck-btn"
-          >
-            <DownloadIcon className="h-3.5 w-3.5" />
-            <span className="deck-btn-label">HTML</span>
-          </button>
+          <div className="deck-menu">
+            <button
+              type="button"
+              onClick={() => setExportOpen((v) => !v)}
+              aria-expanded={exportOpen}
+              aria-haspopup="menu"
+              title="Export or send to Google"
+              className={`deck-btn ${exportOpen ? "deck-btn-on" : ""}`}
+            >
+              <DownloadIcon className="h-3.5 w-3.5" />
+              <span className="deck-btn-label">Export</span>
+              <ChevronUpSmallIcon className={`h-3 w-3 ${exportOpen ? "" : "rotate-180"}`} />
+            </button>
+            {exportOpen && (
+              <>
+                <button
+                  type="button"
+                  className="deck-menu-scrim"
+                  aria-label="Close export menu"
+                  onClick={() => setExportOpen(false)}
+                />
+                <div className="deck-menu-list" role="menu">
+                  <button type="button" role="menuitem" className="deck-menu-item" onClick={() => void sendToDocs()}>
+                    <DocIcon className="h-3.5 w-3.5" />
+                    <span className="deck-menu-text">
+                      Google Docs
+                      <span className="deck-menu-hint">Copy the outline and open a Doc</span>
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="deck-menu-item"
+                    onClick={() => {
+                      setExportOpen(false);
+                      downloadDeckPptx(active);
+                    }}
+                  >
+                    <DownloadIcon className="h-3.5 w-3.5" />
+                    <span className="deck-menu-text">
+                      PowerPoint
+                      <span className="deck-menu-hint">.pptx, opens in Slides too</span>
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="deck-menu-item"
+                    onClick={() => {
+                      setExportOpen(false);
+                      printDeck(active);
+                    }}
+                  >
+                    <PrinterIcon className="h-3.5 w-3.5" />
+                    <span className="deck-menu-text">
+                      PDF
+                      <span className="deck-menu-hint">Print or save as PDF</span>
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="deck-menu-item"
+                    onClick={() => {
+                      setExportOpen(false);
+                      downloadDeckHtml(active);
+                    }}
+                  >
+                    <DownloadIcon className="h-3.5 w-3.5" />
+                    <span className="deck-menu-text">
+                      Web page
+                      <span className="deck-menu-hint">Self-contained HTML deck</span>
+                    </span>
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
           <button
             type="button"
             onClick={() => void copy("deck")}
@@ -227,6 +306,7 @@ export function Deck({
           </button>
         </div>
       </div>
+      {docsNote && <p className="deck-note">{docsNote}</p>}
 
       <div className="deck-body">
         <ol className="deck-rail" aria-label="Slides">

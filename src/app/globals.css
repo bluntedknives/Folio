@@ -1979,6 +1979,76 @@ input {
 .deck-btn-danger:hover:not(:disabled) {
   color: var(--danger);
 }
+.deck-note {
+  padding: 0.45rem 0.8rem;
+  font-size: 0.6875rem;
+  color: var(--ink-600);
+  background: var(--ink-100);
+  border-bottom: 1px solid var(--stroke);
+}
+.deck-menu {
+  position: relative;
+  display: inline-flex;
+}
+/* The scrim catches the next click, so the menu closes on an outside press
+   without a document listener to keep in step with the panel. */
+.deck-menu-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  cursor: default;
+}
+.deck-menu-list {
+  position: absolute;
+  top: calc(100% + 0.35rem);
+  right: 0;
+  z-index: 31;
+  min-width: 15rem;
+  padding: 0.25rem;
+  border: 1px solid var(--stroke-strong);
+  border-radius: 10px;
+  background: var(--ink-150);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 0.28);
+  animation: deck-menu-in 0.14s var(--ease-out) both;
+}
+@keyframes deck-menu-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.deck-menu-item {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 0.55rem;
+  border-radius: 7px;
+  padding: 0.4rem 0.5rem;
+  text-align: left;
+  color: var(--ink-700);
+  transition: background-color 0.14s var(--ease-out), color 0.14s var(--ease-out);
+}
+.deck-menu-item:hover {
+  background: var(--ink-200);
+  color: var(--ink-900);
+}
+.deck-menu-text {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.05rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+.deck-menu-hint {
+  font-size: 0.6875rem;
+  font-weight: 400;
+  color: var(--ink-500);
+}
 @media (max-width: 640px) {
   .deck-btn-label {
     display: none;

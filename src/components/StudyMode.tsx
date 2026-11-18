@@ -13,10 +13,13 @@ import {
   frameSignature,
   grabFrame,
   isBlankSignature,
+  PAGE_CHANGE_THRESHOLD,
   pipApi,
   primeVideo,
+  rememberSignature,
   signatureDistance,
   startScreenShare,
+  wasSignatureRead,
 } from "@/lib/capture";
 import { Markdown } from "./Markdown";
 import { AttachmentRejected, readAttachment } from "@/lib/attachment";
@@ -42,12 +45,8 @@ const MAX_TURNS = 12;
 /** How often the shared screen is sampled for a page change, in ms. */
 const WATCH_TICK_MS = 1200;
 /**
- * Above this fraction of changed cells the screen counts as a different page.
- * Calibrated on a worksheet: a moving cursor measures about 0.002 and a
- * replaced question about 0.009, so this sits clear of both.
+ * Two samples this close together are treated as the same settled page.
  */
-const PAGE_CHANGE_THRESHOLD = 0.005;
-/** Two samples this close together are treated as the same settled page. */
 const SETTLED_THRESHOLD = 0.003;
 /**
  * How small the panel may be dragged. The lower bound is generous enough to
@@ -125,6 +124,11 @@ export function StudyMode({ open, onClose }: { open: boolean; onClose: () => voi
   const busyRef = useRef(false);
   /** Signature of the page we last read, and the candidate next one. */
   const readSignature = useRef<string | null>(null);
+  /**
+   * Fingerprints of the pages already answered this session, newest last. A
+   * scroll back onto one of these is not a new page, so it is not asked again.
+   */
+  const recentReads = useRef<string[]>([]);
   const inFlight = useRef<Set<AbortController>>(new Set());
   const idRef = useRef(0);
   const turnsRef = useRef<Turn[]>([]);
@@ -238,6 +242,8 @@ export function StudyMode({ open, onClose }: { open: boolean; onClose: () => voi
     setTurns([]);
     setRevealed({});
     setBusy(false);
+    readSignature.current = null;
+    recentReads.current = [];
   }, []);
 
   /**
@@ -295,6 +301,12 @@ export function StudyMode({ open, onClose }: { open: boolean; onClose: () => voi
         // the user may be looking at a genuinely dark page.
         const sig = frameSignature(video);
         if (!explicit && sig && isBlankSignature(sig)) return;
+        // A read from the button counts as a read, so the watcher does not ask
+        // about the same page again a moment later.
+        if (sig) {
+          readSignature.current = sig;
+          rememberSignature(recentReads.current, sig);
+        }
         attachment = grabFrame(video, "Screen");
       } else if (photo) {
         attachment = photo;
@@ -320,6 +332,7 @@ export function StudyMode({ open, onClose }: { open: boolean; onClose: () => voi
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
     readSignature.current = null;
+    recentReads.current = [];
     setHasAudioTrack(false);
     setSharing(false);
     setBusy(false);
@@ -494,9 +507,13 @@ export function StudyMode({ open, onClose }: { open: boolean; onClose: () => voi
    *
    * The screen is sampled on a slow timer and compared against the signature of
    * the last page that was read. A change has to hold for two samples before it
-   * counts, so a cursor, a scroll or a video frame does not trigger a read. The
-   * whole page is never kept: only a 16x16 greyscale fingerprint of what was
-   * last read, which lives in a ref and is dropped when the share stops.
+   * counts, so a cursor or a video frame does not trigger a read. Scrolling is
+   * the awkward case: it translates the whole page, so the comparison is
+   * translation-tolerant (see `signatureDistance`), and every page that has been
+   * answered is remembered, so scrolling back over work that is already done
+   * does not ask about it again. The whole page is never kept: only a 64x64
+   * greyscale fingerprint of what was read, which lives in a ref and is dropped
+   * when the share stops.
    */
   useEffect(() => {
     if (!open || !sharing) return;
@@ -520,12 +537,23 @@ export function StudyMode({ open, onClose }: { open: boolean; onClose: () => voi
       // Nothing read yet: read what is on screen now.
       if (readSignature.current === null) {
         readSignature.current = sig;
+        rememberSignature(recentReads.current, sig);
         scan();
         return;
       }
 
       const distance = signatureDistance(sig, readSignature.current);
       if (distance < PAGE_CHANGE_THRESHOLD) {
+        candidate = null;
+        candidateHits = 0;
+        return;
+      }
+
+      // A page already answered is not a new page, however far it was scrolled
+      // away from and back to. Keep the last read in step so the comparison does
+      // not keep firing against a page that is now off screen.
+      if (wasSignatureRead(recentReads.current, sig)) {
+        readSignature.current = sig;
         candidate = null;
         candidateHits = 0;
         return;
@@ -542,6 +570,7 @@ export function StudyMode({ open, onClose }: { open: boolean; onClose: () => voi
 
       if (candidateHits >= 2) {
         readSignature.current = sig;
+        rememberSignature(recentReads.current, sig);
         candidate = null;
         candidateHits = 0;
         scan();
