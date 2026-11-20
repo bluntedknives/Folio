@@ -414,3 +414,15 @@ HEAD:main`); keep it that way rather than merging, so the two stay identical.
 - The legal pages are the only routes that scroll; the chat screen still does
   not. They reuse the app's tokens so following a link does not feel like
   leaving the product. `app/not-found.tsx` shares their shell.
+- Earlier-chat memory is a client-built digest (`src/lib/memory.ts`) sent beside
+  the messages, never inside them, so the route can fence it as recall rather
+  than let the model answer an old question again. It is capped on both sides
+  (`MAX_MEMORY_CHARS = 2000`) and excludes the chat being answered. Anything the
+  model did not write itself (memory, web results, page text) goes through
+  `quoteBlock` in `src/lib/untrusted.ts`; a new context source must do the same.
+- `/api/chat` is an open proxy once deployed, so it admits nothing before
+  `sameOrigin` and `takeToken` have run. The bucket is in-process and therefore
+  per-instance: a multi-instance deploy needs a shared store, or the burst of 30
+  becomes 30 per instance. Push is blocked in this container: the GitHub token
+  is read-only (API writes answer "Resource not accessible by integration") and
+  there is no `ssh` binary, so commits stay local until pushed elsewhere.
