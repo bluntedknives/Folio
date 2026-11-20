@@ -1,6 +1,7 @@
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
 import { extractReadable, type PageMeta } from "./html";
+import { UNTRUSTED_NOTICE } from "./untrusted";
 import type { PageContext } from "./types";
 
 /**
@@ -296,6 +297,7 @@ export function formatPages(pages: PageContext[]): string {
   return [
     "Web page text for this question. It is the readable text of the page, not a summary, and it may be truncated or partly navigation.",
     "Use it for facts and quote from it where useful, citing the page as a Markdown link. Do not invent anything that is not in the text.",
+    UNTRUSTED_NOTICE,
     "",
     ...blocks,
   ].join("\n\n");

@@ -794,6 +794,21 @@ input {
   color: var(--ink-900);
 }
 
+/* Memory recall, on by default. When it is on the icon reads as live: a soft
+   accent wash behind it, and off it goes quiet like any other idle button. The
+   difference is colour and weight, not an extra badge, so it stays a two-state
+   control rather than a light that needs decoding. */
+.memory-toggle[data-memory="on"] {
+  color: var(--ink-900);
+  background: var(--ink-150);
+}
+.memory-toggle[data-memory="on"]:hover {
+  background: var(--ink-200);
+}
+.memory-toggle[data-memory="off"] {
+  color: var(--ink-400);
+}
+
 /* ---------- plotter ---------- */
 
 .plotter-label {
@@ -1134,7 +1149,8 @@ input {
   height: auto;
   max-height: none;
 }
-.study-mini .study-status {
+.study-mini .study-status,
+.study-mini .study-memory {
   display: none;
 }
 
@@ -1361,6 +1377,20 @@ input {
     opacity: 1;
     transform: scale(1);
   }
+}
+
+/* How many earlier screens are still held for the next question. Quiet, so it
+   reads as state rather than as a control. */
+.study-memory {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.1rem 0.4rem;
+  border: 1px solid var(--stroke);
+  border-radius: 999px;
+  font-size: 0.625rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-500);
+  white-space: nowrap;
 }
 
 .study-error {

@@ -1,5 +1,6 @@
 import type { Source } from "./types";
 import { capPerDomain, withDomain } from "./domain";
+import { UNTRUSTED_NOTICE } from "./untrusted";
 
 /**
  * Web search, run on the server so there is no CORS problem, the query never
@@ -239,6 +240,7 @@ export function formatSources(results: Source[]): string {
   return [
     "Web results for this question. Use them for facts and cite the ones you use as Markdown links.",
     "Link the exact URL given, never the site's home page, and name the site (its Domain) when you cite it.",
+    UNTRUSTED_NOTICE,
     "",
     ...lines,
   ].join("\n");

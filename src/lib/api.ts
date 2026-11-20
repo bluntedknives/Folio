@@ -23,6 +23,7 @@ export async function streamChat(
   query: string,
   signal: AbortSignal,
   handlers: StreamHandlers,
+  memory = "",
 ): Promise<void> {
   // The video the newest turn is about, if any. Sent as an id rather than as
   // metadata: the server re-reads the video, so nothing about it is stored and
@@ -37,6 +38,10 @@ export async function streamChat(
       messages: toWire(history),
       query,
       videoId: videoId ?? undefined,
+      // A digest of earlier chats, when the student has it on. It is built and
+      // capped on this side, and the route re-caps it, so a tampered value
+      // cannot grow the prompt.
+      memory: memory || undefined,
     }),
     signal,
   });

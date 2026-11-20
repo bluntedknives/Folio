@@ -17,6 +17,7 @@ import {
   type ConversationSummary,
 } from "@/lib/store";
 import { conversationToMarkdown, downloadText, safeFilename } from "@/lib/export";
+import { buildMemory, memoryEnabled } from "@/lib/memory";
 import { Sidebar } from "./Sidebar";
 import { MessageBubble } from "./Message";
 import Link from "next/link";
@@ -151,6 +152,23 @@ export function Chat() {
   }
 
   /**
+   * The digest of earlier chats to send with a turn, or "" when the student has
+   * memory off.
+   *
+   * Read from the store at send time rather than held in state: the point is to
+   * include chats from before this page load, and the store already has them.
+   * The conversation being answered is excluded, since its own turns are in the
+   * prompt already.
+   */
+  const memoryFor = useCallback((excludeId: string) => {
+    if (!memoryEnabled()) return "";
+    const earlier = listConversations()
+      .map((s) => readConversation(s.id))
+      .filter((c): c is Conversation => c !== null);
+    return buildMemory(earlier, { excludeId });
+  }, []);
+
+  /**
    * Runs one assistant turn against `history` and streams it into the message
    * with id `assistantId`. Shared by send and regenerate.
    */
@@ -161,6 +179,7 @@ export function Chat() {
       model: string,
       label: string,
       query: string,
+      memory = "",
     ) => {
       setWorking(label);
       setStreaming(true);
@@ -195,7 +214,7 @@ export function Chat() {
             if (sources.length) patch((m) => ({ ...m, sources }));
           },
           onDone: () => {},
-        });
+        }, memory);
         // A reasoning model can spend its whole budget on chain-of-thought and
         // stop before the answer starts. Surface that instead of an empty bubble.
         if (!answered) {
@@ -266,9 +285,9 @@ export function Chat() {
       writeConversation(next);
       setSummaries(listConversations());
 
-      await runTurn(history, assistantId, model, label, text);
+      await runTurn(history, assistantId, model, label, text, memoryFor(conversation.id));
     },
-    [conversation, runTurn],
+    [conversation, runTurn, memoryFor],
   );
 
   /** Re-asks the last user turn, replacing the assistant reply below it. */
@@ -303,8 +322,8 @@ export function Chat() {
       updatedAt: Date.now(),
     });
 
-    await runTurn(history, assistantId, model, label, prompt);
-  }, [conversation, runTurn, streaming]);
+    await runTurn(history, assistantId, model, label, prompt, memoryFor(conversation.id));
+  }, [conversation, runTurn, streaming, memoryFor]);
 
   const stop = useCallback(() => abortRef.current?.abort(), []);
 

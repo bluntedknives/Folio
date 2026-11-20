@@ -7,6 +7,7 @@ import { clearAll, storedBytes } from "@/lib/store";
 import { BRAND } from "@/lib/brand";
 import { formatBytes } from "@/lib/attachment";
 import { ThemeToggle } from "./ThemeToggle";
+import { MemoryToggle } from "./MemoryToggle";
 import { FolioMark, LockIcon, PlusIcon, SearchIcon, TrashIcon, XIcon } from "./icons";
 
 export function Sidebar({
@@ -137,6 +138,7 @@ export function Sidebar({
 
           <div className="flex items-center gap-1 rounded-lg px-1 py-0.5">
             <ThemeToggle className="icon-button" />
+            <MemoryToggle className="icon-button memory-toggle" />
             {conversations.length > 0 && (
               <div className="ml-auto">
                 {confirming ? (

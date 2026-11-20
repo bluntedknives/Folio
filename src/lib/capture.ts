@@ -196,13 +196,97 @@ export function grabFrame(video: HTMLVideoElement, name = "Screen"): Attachment 
   };
 }
 
+/**
+ * A page that has been read, kept so a later question can still be answered
+ * from it.
+ *
+ * The whole point is the scroll: a worksheet is taller than the shared screen,
+ * so the question ("select the answer 2") and the thing it refers to ("2") are
+ * often on two different screens. Sending only the newest frame makes the model
+ * forget the earlier one the moment the user scrolls, which is exactly the bug
+ * this fixes. Each entry is the frame as it was sent, at a smaller size,
+ * because it is context rather than the subject of the question.
+ */
+export interface PageMemory {
+  /** Perceptual fingerprint, so the same page is not stored twice. */
+  signature: string;
+  /** JPEG data URL, downscaled. */
+  dataUrl: string;
+  /** The words the page was read with, so a memory can be labelled. */
+  question: string;
+}
+
+/**
+ * How many earlier pages are kept.
+ *
+ * Two is the useful number: a question and the answer options below it are the
+ * common pair, and a third screen is usually a different assignment. More than
+ * this multiplies prompt size (each frame is an image part) for pages the user
+ * has finished with.
+ */
+export const MAX_PAGE_MEMORY = 2;
+
+/** Longest edge of a remembered frame. Enough to read a heading, not a paragraph. */
+const MEMORY_EDGE = 1100;
+
+/**
+ * Captures the current frame as a memory entry, or null when the frame is
+ * unusable. Deliberately a separate grab from the one being sent: the memory is
+ * downscaled, and the frame the question is about must stay full size.
+ */
+export function grabMemoryFrame(video: HTMLVideoElement): Frame | null {
+  return drawFrame(video, MEMORY_EDGE);
+}
+
+/**
+ * Adds a page to the memory, newest last, dropping the oldest past the cap.
+ *
+ * A page already in the memory is moved to the end rather than duplicated:
+ * scrolling back and forth over the same two screens would otherwise fill the
+ * memory with copies of one page and push the other out. The signature
+ * comparison is the same translation-tolerant one the watcher uses, so a page
+ * read at a different scroll position still counts as the page already there.
+ */
+export function rememberPage(
+  memory: PageMemory[],
+  signature: string,
+  dataUrl: string,
+  question: string,
+): void {
+  for (let i = memory.length - 1; i >= 0; i--) {
+    if (signatureDistance(signature, memory[i].signature) < PAGE_CHANGE_THRESHOLD) {
+      memory.splice(i, 1);
+      break;
+    }
+  }
+  memory.push({ signature, dataUrl, question });
+  if (memory.length > MAX_PAGE_MEMORY) memory.splice(0, memory.length - MAX_PAGE_MEMORY);
+}
+
+/**
+ * The memories to send ahead of the newest frame, oldest first.
+ *
+ * A page that has since been superseded is still worth sending: the question
+ * about it is what the newest frame is following on from. They are capped by
+ * count in `MAX_PAGE_MEMORY` and each is downscaled, so the prompt stays a
+ * sane size even with a full memory.
+ */
+export function memoryAttachments(memory: PageMemory[]): Attachment[] {
+  return memory.map((page, i) => ({
+    kind: "image" as const,
+    name: `Earlier screen ${i + 1}`,
+    dataUrl: page.dataUrl,
+    bytes: dataUrlBytes(page.dataUrl),
+  }));
+}
+
 /** Draws the current frame to a canvas and returns it as a JPEG data URL. */
-export function drawFrame(video: HTMLVideoElement): Frame | null {
+export function drawFrame(video: HTMLVideoElement, maxEdge = MAX_EDGE): Frame | null {
   const sourceWidth = video.videoWidth;
   const sourceHeight = video.videoHeight;
   if (!sourceWidth || !sourceHeight) return null;
 
-  const scale = Math.min(1, MAX_EDGE / Math.max(sourceWidth, sourceHeight));
+  const scale = Math.min(1, maxEdge / Math.max(sourceWidth, sourceHeight));
   const width = Math.max(1, Math.round(sourceWidth * scale));
   const height = Math.max(1, Math.round(sourceHeight * scale));
 

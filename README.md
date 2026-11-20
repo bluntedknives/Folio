@@ -29,6 +29,14 @@ No signup. Nothing is stored on a server. History lives in your browser.
   base64-encoded payload, which keeps history from being casually readable in
   devtools. That is obfuscation, not encryption: anyone with access to this
   machine can decode it, so the sidebar offers a clear-all button.
+- Remembers earlier chats. A new chat gets a short digest of what you asked and
+  were told before, so "now do part b" still makes sense after you start a fresh
+  thread. Only text is carried: no attachments, no reasoning, and the current
+  chat is never duplicated into it. The book icon in the sidebar footer turns it
+  off, and the setting is remembered.
+- Study mode keeps the last two screens. Share a screen and it reads the page on
+  demand; when you scroll on, the page it already read stays available, so a
+  follow-up about a question that has scrolled away still resolves.
 - Exports a conversation as Markdown.
 
 ## Setup
@@ -49,6 +57,21 @@ Get a key at https://build.nvidia.com. The app talks to
 `NVIDIA_API_KEY` has no `NEXT_PUBLIC_` prefix, so Next.js never inlines it into
 the browser bundle. The browser calls `/api/chat`; only that route handler ever
 sees the key, and it is never sent back in a response. `.env*` is gitignored.
+
+## Limits and guards
+
+The route is a public endpoint once deployed, so it does not trust its callers:
+
+- Requests must be same-origin. A request whose `Origin` names another host is
+  refused, which stops other sites from spending your key.
+- Each client address gets a token bucket: a burst of 30 requests, then one
+  every four seconds. Over the limit, the route answers 429 and says when to
+  retry.
+- Bodies are capped per message, per part and in total. Memory is capped
+  separately at 2000 characters, so a long digest cannot crowd out the question.
+- Anything the model did not write itself (web results, page text, an earlier
+  chat's digest) is wrapped in a boundary marker and labelled as untrusted, so
+  instructions hidden in a web page or a screenshot are not treated as yours.
 
 ## Models
 

@@ -3,6 +3,12 @@ import { MODELS, getModel, type ModelInfo } from "@/lib/models";
 import type { WireMessage, WirePart } from "@/lib/types";
 
 const MAX_MESSAGES = 40;
+/**
+ * Cap on the earlier-chat digest. The client caps at the same number, and the
+ * route caps again: the digest is a hint for the model, and a request that
+ * arrives with a novel attached to it is not one this app sends.
+ */
+const MAX_MEMORY_CHARS = 2000;
 const MAX_CHARS_PER_MESSAGE = 20000;
 const MAX_PARTS = 10;
 const MAX_PART_CHARS = 24_000_000;
@@ -21,6 +27,8 @@ export interface ChatRequestBody {
   hasAudio: boolean;
   /** True when the newest turn carries a video. */
   hasVideo: boolean;
+  /** Digest of earlier chats, when the student has memory on. */
+  memory: string;
 }
 
 export type ParseResult =
@@ -83,6 +91,15 @@ export async function readChatRequest(request: Request): Promise<ParseResult> {
   if (messages.length === 0) return { ok: false, response: fail(400, "No messages were sent.") };
 
   const query = typeof body.query === "string" ? body.query.slice(0, 2000) : "";
+  // Untrusted like any other field: it is capped here rather than trusted from
+  // the client, and control characters are stripped so a digest cannot smuggle
+  // in formatting that looks like part of the system prompt.
+  const memory =
+    typeof body.memory === "string"
+      ? body.memory
+          .slice(0, MAX_MEMORY_CHARS)
+          .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, "")
+      : "";
   // The video id is validated here as well as on the server, so a malformed id
   // never reaches the fetch. Anything that is not a plain 11-character id is
   // dropped rather than rejected: the question is still answerable without it.
@@ -94,7 +111,10 @@ export async function readChatRequest(request: Request): Promise<ParseResult> {
   const hasAudio = (latest?.parts ?? []).some((p) => p.type === "input_audio");
   const hasVideo = (latest?.parts ?? []).some((p) => p.type === "video_url");
 
-  return { ok: true, body: { model: model.id, messages, query, videoId, hasImages, hasAudio, hasVideo } };
+  return {
+    ok: true,
+    body: { model: model.id, messages, query, videoId, hasImages, hasAudio, hasVideo, memory },
+  };
 }
 
 type PartsResult = { ok: true; value: WirePart[] } | { ok: false; response: NextResponse };

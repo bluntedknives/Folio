@@ -184,6 +184,22 @@ export function MoonIcon({ className }: IconProps) {
   );
 }
 
+/**
+ * Memory: an open book with a bookmark, for recalling earlier chats.
+ *
+ * Drawn on the same 24-unit grid and 1.5 stroke as the rest, so it sits evenly
+ * beside the theme toggle.
+ */
+export function MemoryIcon({ className }: IconProps) {
+  return (
+    <svg {...base} className={className}>
+      <path d="M12 6.5C10.6 5.2 8.6 4.6 6.2 4.6c-.9 0-1.7.1-2.4.3v13c.7-.2 1.5-.3 2.4-.3 2.4 0 4.4.6 5.8 1.9" />
+      <path d="M12 6.5c1.4-1.3 3.4-1.9 5.8-1.9.9 0 1.7.1 2.4.3v13c-.7-.2-1.5-.3-2.4-.3-2.4 0-4.4.6-5.8 1.9" />
+      <path d="M12 6.5v12.5" />
+    </svg>
+  );
+}
+
 /** Graph/plot icon for the custom plotter. */
 export function PlotIcon({ className }: IconProps) {
   return (
