@@ -423,6 +423,11 @@ HEAD:main`); keep it that way rather than merging, so the two stay identical.
 - `/api/chat` is an open proxy once deployed, so it admits nothing before
   `sameOrigin` and `takeToken` have run. The bucket is in-process and therefore
   per-instance: a multi-instance deploy needs a shared store, or the burst of 30
-  becomes 30 per instance. Push is blocked in this container: the GitHub token
-  is read-only (API writes answer "Resource not accessible by integration") and
-  there is no `ssh` binary, so commits stay local until pushed elsewhere.
+  becomes 30 per instance.
+- Pushing is over SSH with a deploy key kept on the persistent volume, not the
+  HTTPS token (that token is read-only: API writes answer "Resource not
+  accessible by integration"). `~/.ssh` and `~/.gitconfig` are on the ephemeral
+  overlay and `ssh` may not be installed, so after a container reset run
+  `sh /workspace/.secrets/setup-ssh.sh` before pushing. It restores the key, the
+  host keys, the ssh config and the `bluntedknives` commit identity. `git push
+  origin <branch>` then works; there is no need to touch the HTTPS remote.
